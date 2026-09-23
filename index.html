@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B3A66" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Cosecha" />
+  <meta name="description" content="Q Berries — Reporte diario de cosecha" />
+  <title>Q Berries · Cosecha</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="qb-loader" id="qb-loader" hidden>
+    <div class="qb-loader-card"><span class="qb-spinner"></span><p id="qb-loader-text">Guardando…</p></div>
+  </div>
+  <div class="qb-fb" id="qb-fb" hidden>
+    <div class="qb-fb-sheet">
+      <strong id="qb-fb-title"></strong>
+      <p id="qb-fb-text"></p>
+      <div class="qb-fb-actions" id="qb-fb-actions"></div>
+    </div>
+  </div>
+
+  <div class="app">
+    <header class="topbar">
+      <img class="brand-logo" src="assets/logo-qberries.png" alt="Q Berries" />
+      <div class="topbar-actions">
+        <div class="status-chip" id="chip-online"><span class="dot"></span><span>En línea</span></div>
+        <span class="date-chip" id="chip-fecha"></span>
+      </div>
+    </header>
+
+    <main class="panel-scroll">
+      <section class="card">
+        <h2>Equipo del día</h2>
+        <button type="button" class="pick-row" id="trig-supervisor">
+          <small>Supervisor</small>
+          <span id="lbl-supervisor">Seleccionar…</span>
+        </button>
+        <button type="button" class="pick-row" id="trig-scanner">
+          <small>Escáner</small>
+          <span id="lbl-scanner">Seleccionar…</span>
+        </button>
+        <label class="field-num">
+          <small>Jornales (personas)</small>
+          <input id="inp-jornales" inputmode="numeric" value="36" />
+        </label>
+      </section>
+
+      <section class="card" id="lote-card">
+        <h2>Registrar lote</h2>
+        <button type="button" class="pick-row" id="trig-lote">
+          <small>Lote</small>
+          <span id="lbl-lote">Seleccionar lote…</span>
+        </button>
+        <div class="auto-grid" id="lote-meta">
+          <div><small>Módulo</small><strong id="lbl-md">—</strong></div>
+          <div><small>Turno</small><strong id="lbl-turno">—</strong></div>
+          <div><small>Área</small><strong id="lbl-area">—</strong></div>
+        </div>
+        <p class="lote-extra" id="lbl-extra"></p>
+        <label class="field-num">
+          <small>Avance (ha)</small>
+          <input id="inp-avance" inputmode="decimal" placeholder="0" />
+        </label>
+
+        <p class="check-label">¿Con qué trabajó?</p>
+        <div class="checks">
+          <label class="check">
+            <input type="checkbox" id="chk-conv" />
+            <span>Convencional</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="chk-china" />
+            <span>China</span>
+          </label>
+        </div>
+
+        <div id="box-conv" class="kind-box" hidden>
+          <label class="field-num">
+            <small>Jarras convencional</small>
+            <input id="inp-jconv" inputmode="numeric" placeholder="0" />
+          </label>
+        </div>
+        <div id="box-china" class="kind-box china" hidden>
+          <label class="field-num">
+            <small>Jarras China</small>
+            <input id="inp-jchina" inputmode="numeric" placeholder="0" />
+          </label>
+        </div>
+
+        <div class="totals" id="live-totals">
+          <span>0 jarras</span>
+          <span>0 kg</span>
+        </div>
+        <button type="button" class="btn-main" id="btn-save">Guardar lote</button>
+      </section>
+
+      <section class="card">
+        <h2>Hoy</h2>
+        <div class="day-kpis" id="day-kpis"></div>
+        <div class="lot-list" id="lot-list"></div>
+        <button type="button" class="btn-ghost" id="btn-export">Exportar Excel</button>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/select.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/excel.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
