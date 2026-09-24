@@ -29,7 +29,7 @@ function doGet(e) {
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  lock.waitLock(15000);
   try {
     var raw = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
     var body = JSON.parse(raw);
@@ -38,11 +38,19 @@ function doPost(e) {
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
     var result = upsertBatch_(sh, recs, headers);
+    // El guardado ya quedó. El resumen NO debe tumbar el POST (si falla, el celular quedaba en pendiente).
     if (body.rebuild !== false && result.changed && result.fechas.length) {
-      rebuildDays_(ss, headers, result.values, result.fechas);
-      rebuildResponsables_(ss, headers, result.values, result.fechas);
+      try {
+        var dayValues = readLogForFechas_(sh, headers, result.fechas);
+        rebuildDays_(ss, headers, dayValues, result.fechas);
+        rebuildResponsables_(ss, headers, dayValues, result.fechas);
+      } catch (rebuildErr) {}
     }
-    return jsonOut_({ ok: true, accepted: result.accepted, existing: result.existing });
+    return jsonOut_({
+      ok: true,
+      accepted: result.accepted || [],
+      existing: result.existing || []
+    });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
@@ -110,6 +118,17 @@ function ensureHeaders_(sh) {
   }
   var lastCol = Math.max(sh.getLastColumn(), 1);
   var have = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (lastCol >= HEADERS.length && String(have[0]) === 'Fecha') {
+    var missing = false;
+    var h;
+    for (h = 0; h < HEADERS.length; h++) {
+      if (have.indexOf(HEADERS[h]) === -1) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) return have;
+  }
   HEADERS.forEach(function (name) {
     if (have.indexOf(name) === -1) {
       sh.getRange(1, have.length + 1).setValue(name);
@@ -220,20 +239,30 @@ function writeRanges_(sh, updates, appends) {
   }
 }
 
+/** Solo lee ClientId (+ claves cortas) para upsert rápido. No carga toda la hoja. */
 function upsertBatch_(sh, recs, headers) {
   headers = headers || ensureHeaders_(sh);
   var last = sh.getLastRow();
-  var data = last > 1 ? sh.getRange(2, 1, last - 1, headers.length).getValues() : [];
-  var originalLen = data.length;
-  var idx = indexLog_(data, headers);
+  var idCol = col_(headers, 'ClientId');
+  var byId = {};
+  if (last > 1 && idCol >= 0) {
+    var idVals = sh.getRange(2, idCol + 1, last - 1, 1).getValues();
+    var i;
+    for (i = 0; i < idVals.length; i++) {
+      var cid = String(idVals[i][0] || '').trim();
+      if (cid) byId[cid] = i + 2;
+    }
+  }
+
+  var updates = [];
+  var appends = [];
   var accepted = [];
   var existing = [];
   var fechas = {};
-  var changedAt = {};
-  var i;
+  var iRec;
 
-  for (i = 0; i < recs.length; i++) {
-    var item = recs[i] || {};
+  for (iRec = 0; iRec < recs.length; iRec++) {
+    var item = recs[iRec] || {};
     var d = item.data || {};
     var id = String(item.clientId || d.clientId || '').trim();
     var lote = String(d.lote || '').trim();
@@ -243,47 +272,47 @@ function upsertBatch_(sh, recs, headers) {
     d.turnoCampo = normTurno_(d.turnoCampo);
     d.supervisorDni = String(d.supervisorDni || '').trim();
     var values = buildRow_(headers, d, id);
-    var hit = idx.byId.hasOwnProperty(id) ? idx.byId[id] : -1;
-    if (hit < 0) {
-      var key = fallbackKeyFromData_(d);
-      if (key && idx.byKey.hasOwnProperty(key)) hit = idx.byKey[key];
-    }
-    if (hit >= 0) {
-      data[hit] = values;
-      idx.byId[id] = hit;
-      var oldKey = fallbackKeyFromRow_(values, headers);
-      if (oldKey) idx.byKey[oldKey] = hit;
-      changedAt[hit] = true;
+    if (byId.hasOwnProperty(id)) {
+      updates.push({ row: byId[id], values: values });
       existing.push(id);
     } else {
-      hit = data.length;
-      data.push(values);
-      idx.byId[id] = hit;
-      var newKey = fallbackKeyFromData_(d);
-      if (newKey) idx.byKey[newKey] = hit;
+      appends.push(values);
+      byId[id] = -1;
       accepted.push(id);
     }
     if (d.fecha) fechas[d.fecha] = true;
   }
 
-  var updates = [];
-  var appends = [];
-  for (i = 0; i < data.length; i++) {
-    if (i < originalLen) {
-      if (changedAt[i]) updates.push({ row: i + 2, values: data[i] });
-    } else {
-      appends.push(data[i]);
-    }
-  }
   writeRanges_(sh, updates, appends);
 
   return {
     accepted: accepted,
     existing: existing,
     changed: accepted.length + updates.length > 0,
-    fechas: Object.keys(fechas),
-    values: data
+    fechas: Object.keys(fechas)
   };
+}
+
+/** Lee solo filas de las fechas pedidas (1 pasada). */
+function readLogForFechas_(sh, headers, isoList) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var want = {};
+  (isoList || []).forEach(function (iso) {
+    var f = toIsoFecha_(iso);
+    if (f) want[f] = true;
+  });
+  if (!Object.keys(want).length) return [];
+  var fechaCol = col_(headers, 'Fecha');
+  var data = sh.getRange(2, 1, last - 1, headers.length).getValues();
+  if (fechaCol < 0) return data;
+  var out = [];
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var f = toIsoFecha_(data[i][fechaCol]);
+    if (want[f]) out.push(data[i]);
+  }
+  return out;
 }
 
 function toIsoFecha_(v) {
@@ -402,16 +431,20 @@ function dropOldResumen_(ss) {
 }
 
 function writeDaySheet_(sh, rows) {
-  sh.clear();
-  sh.getRange(1, 1, 1, RESUMEN_HEADERS.length).setValues([RESUMEN_HEADERS]);
+  var cols = RESUMEN_HEADERS.length;
+  var wasEmpty = sh.getLastRow() === 0;
+  var totRow = (rows && rows.length ? rows.length : 0) + 2;
+  var clearTo = Math.max(sh.getLastRow(), totRow);
+  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent();
+
+  sh.getRange(1, 1, 1, cols).setValues([RESUMEN_HEADERS]);
   var lastData = 1;
-  if (rows.length) {
-    sh.getRange(2, 1, rows.length, RESUMEN_HEADERS.length).setValues(rows);
+  if (rows && rows.length) {
+    sh.getRange(2, 1, rows.length, cols).setValues(rows);
     lastData = 1 + rows.length;
   }
-  var totRow = lastData + 1;
   var empty = ['', '', '', '', '', '', '', 0, '', '', '', 0, 0, 0, '', '', ''];
-  if (rows.length) {
+  if (rows && rows.length) {
     empty[7] = rows.reduce(function (a, r) { return a + num(r[7]); }, 0);
     empty[11] = Math.round(rows.reduce(function (a, r) { return a + num(r[11]); }, 0) * 100) / 100;
     empty[12] = rows.reduce(function (a, r) { return a + num(r[12]); }, 0);
@@ -419,9 +452,13 @@ function writeDaySheet_(sh, rows) {
     empty[14] = empty[11] > 0 ? Math.round(empty[13] / empty[11]) : '';
     empty[15] = empty[12] > 0 ? Math.round(empty[13] / empty[12]) : '';
   }
-  sh.getRange(totRow, 1, 1, RESUMEN_HEADERS.length).setValues([empty]);
+  sh.getRange(totRow, 1, 1, cols).setValues([empty]);
   sh.getRange(totRow, 1).setValue('TOTAL');
-  styleResumen_(sh, lastData, totRow);
+  if (wasEmpty) styleResumen_(sh, lastData, totRow);
+  else {
+    sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
+    sh.getRange(totRow, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
+  }
 }
 
 function supervisorKey_(dni, nombre, nameToDni) {
@@ -631,37 +668,36 @@ function groupResponsables_(headers, values) {
 }
 
 function writeResponsablesSheet_(sh, rows) {
-  sh.clear();
-  sh.getRange(1, 1, 1, RESP_HEADERS.length).setValues([RESP_HEADERS]);
-  if (rows && rows.length) {
-    sh.getRange(2, 1, rows.length, RESP_HEADERS.length).setValues(rows);
-  }
-  var last = 1 + (rows ? rows.length : 0);
   var cols = RESP_HEADERS.length;
-  var all = sh.getRange(1, 1, Math.max(last, 1), cols);
-  all.setFontFamily('Calibri')
-    .setFontSize(10)
-    .setFontColor('#000000')
-    .setBackground('#FFFFFF')
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle')
-    .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
-  sh.setFrozenRows(1);
-  sh.getRange(1, 1, 1, cols)
-    .setBackground('#F3F3F3')
-    .setFontWeight('bold');
+  var wasEmpty = sh.getLastRow() === 0;
+  var last = 1 + (rows ? rows.length : 0);
+  var clearTo = Math.max(sh.getLastRow(), last);
+  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent();
+  sh.getRange(1, 1, 1, cols).setValues([RESP_HEADERS]);
+  if (rows && rows.length) {
+    sh.getRange(2, 1, rows.length, cols).setValues(rows);
+  }
+  if (wasEmpty) {
+    var all = sh.getRange(1, 1, Math.max(last, 1), cols);
+    all.setFontFamily('Calibri')
+      .setFontSize(10)
+      .setFontColor('#000000')
+      .setBackground('#FFFFFF')
+      .setHorizontalAlignment('center')
+      .setVerticalAlignment('middle')
+      .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
+    var widths = [92, 220, 100, 110, 70, 70, 86];
+    widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+    sh.setTabColor('#F7941D');
+  } else {
+    sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
+  }
   if (rows && rows.length) {
     sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0');
     sh.getRange(2, 6, rows.length, 1).setNumberFormat('0.00');
   }
-  var widths = [92, 220, 100, 110, 70, 70, 86];
-  widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
-  sh.setTabColor('#F7941D');
-  try {
-    var f = sh.getFilter();
-    if (f) f.remove();
-  } catch (e1) {}
-  if (rows && rows.length) sh.getRange(1, 1, last, cols).createFilter();
 }
 
 function rebuildResponsables_(ss, headers, values, isoList) {

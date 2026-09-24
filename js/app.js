@@ -588,16 +588,20 @@ APP.App = (() => {
         onSelect: async (opt) => {
           const nextDni = String(opt.dni || opt.id || "");
           const nextName = opt.nombre || opt.label;
-          if (nextDni && nextDni === String(state.session.supervisorDni || "")) return;
-          const n = APP.API.todayCount();
-          const ok = await ask(
-            "Cambiar supervisor",
-            n
-              ? "Los lotes de hoy se quedan. Los nuevos se registran con el supervisor nuevo. ¿Seguro?"
-              : "Vas a cambiar de supervisor. ¿Seguro?",
-            "Cambiar"
-          );
-          if (!ok) return;
+          const prevDni = String(state.session.supervisorDni || "").trim();
+          if (nextDni && nextDni === prevDni) return;
+          // Primera vez: elegir sin preguntar. Solo confirmar si ya había supervisor.
+          if (prevDni) {
+            const n = APP.API.todayCount();
+            const ok = await ask(
+              "Cambiar supervisor",
+              n
+                ? "Los lotes de hoy se quedan. Los nuevos se registran con el supervisor nuevo. ¿Seguro?"
+                : "Vas a cambiar de supervisor. ¿Seguro?",
+              "Cambiar"
+            );
+            if (!ok) return;
+          }
           state.session.supervisorDni = nextDni;
           state.session.supervisorNombre = nextName;
           persistSession();
@@ -1190,7 +1194,7 @@ APP.App = (() => {
       });
       paintStatus();
 
-      // Sin internet: pendiente al toque, sin loader ni “Enviando…”.
+      // Sin internet: pendiente al toque, sin loader.
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         if (!auto) {
           await feedback(
@@ -1202,18 +1206,7 @@ APP.App = (() => {
         return;
       }
 
-      const live = await APP.API.probe();
-      if (!live || !live.ok) {
-        if (!auto) {
-          await feedback(
-            "Quedó pendiente",
-            `${totalTxt}. El servidor no respondió. Tus lotes siguen en el celular.`,
-            { ms: 2400 }
-          );
-        }
-        return;
-      }
-
+      // Con red: enviar directo (sin ping previo que bloqueaba / duplicaba espera).
       showLoader("Enviando", isSecond ? "Enviando el reporte de tarde…" : "Enviando el reporte de mañana…");
       const result = await APP.API.flush({
         summary: totalTxt,

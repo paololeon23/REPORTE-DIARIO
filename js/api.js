@@ -12,7 +12,7 @@ APP.API = (() => {
   const DAY_MS = 24 * 60 * 60 * 1000;
   const SEND_TIMEOUT = 40000;
   const PING_TIMEOUT = 10000;
-  const BATCH = 15;
+  const BATCH = 25;
   const MAX_FLUSH_FAILURES = 3;
 
   let syncLock = null;
@@ -385,7 +385,7 @@ APP.API = (() => {
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body,
       },
-      SEND_TIMEOUT
+      rebuild ? 55000 : SEND_TIMEOUT
     );
     const text = await res.text();
     let json = null;
@@ -394,6 +394,12 @@ APP.API = (() => {
     } catch (_) {}
     if (!json || !json.ok) throw new Error("bad-response");
     const okIds = new Set([].concat(json.accepted || [], json.existing || []));
+    // Si el servidor guardó (ok:true) pero no listó IDs, confirmar el lote enviado.
+    if (!okIds.size) {
+      batch.forEach((r) => {
+        if (r && r.clientId) okIds.add(r.clientId);
+      });
+    }
     return okIds;
   }
 
@@ -402,8 +408,9 @@ APP.API = (() => {
     const summary = opts && opts.summary ? String(opts.summary) : "";
     const turnoCampo = opts && opts.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     pruneOldRecords();
-    const live = await probe();
-    if (!live.ok) return { sent: 0, left: lotPendingCount(), reason: live.reason || "offline", reports: pendingCount() };
+    if (!endpoint()) {
+      return { sent: 0, left: lotPendingCount(), reason: "no-ep", reports: pendingCount() };
+    }
 
     let sent = 0;
     let guard = 0;
@@ -430,40 +437,47 @@ APP.API = (() => {
           sent += ok.length;
         }
         if (fail.length) {
-          const list = all().map((r) =>
-            fail.some((f) => f.clientId === r.clientId)
-              ? { ...r, syncStatus: "pending", syncAttempts: Number(r.syncAttempts || 0) + 1 }
-              : r
+          write(
+            all().map((r) =>
+              fail.some((f) => f.clientId === r.clientId)
+                ? { ...r, syncStatus: "pending", syncAttempts: Number(r.syncAttempts || 0) + 1 }
+                : r
+            ),
+            true
           );
-          write(list, true);
           failures += 1;
           if (failures >= MAX_FLUSH_FAILURES) {
-            return { sent, left: lotPendingCount(), reason: "partial", reports: pendingCount() };
+            break;
           }
         } else {
           failures = 0;
         }
       } catch (_) {
-        const list = all().map((r) =>
-          ids.includes(r.clientId)
-            ? { ...r, syncStatus: "pending", syncAttempts: Number(r.syncAttempts || 0) + 1 }
-            : r
+        write(
+          all().map((r) =>
+            ids.includes(r.clientId)
+              ? { ...r, syncStatus: "pending", syncAttempts: Number(r.syncAttempts || 0) + 1 }
+              : r
+          ),
+          true
         );
-        write(list, true);
         failures += 1;
         if (failures >= MAX_FLUSH_FAILURES) {
           return { sent, left: lotPendingCount(), reason: "net", reports: pendingCount() };
         }
-        await tick(Math.min(2500, 600 * failures));
-        const again = await probe();
-        if (!again.ok) break;
+        await tick(Math.min(2000, 500 * failures));
       }
-      await tick(200);
+      await tick(120);
     }
     const left = lotPendingCount();
     if (left === 0) clearOutboxReport(turnoCampo);
     window.dispatchEvent(new Event("app:activity"));
-    return { sent, left, reports: pendingCount() };
+    return {
+      sent,
+      left,
+      reason: left > 0 ? (sent > 0 ? "partial" : "net") : "",
+      reports: pendingCount(),
+    };
   }
 
   function flush(opts) {

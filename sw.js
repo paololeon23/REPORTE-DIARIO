@@ -1,4 +1,4 @@
-const CACHE = "qb-cosecha-v109";
+const CACHE = "qb-cosecha-v113";
 const ASSETS = [
   "./",
   "./index.html",
