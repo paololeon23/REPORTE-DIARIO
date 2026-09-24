@@ -11,8 +11,9 @@ APP.API = (() => {
   const OUTBOX_KEY = "app_cosecha_outbox";
   const DAY_MS = 24 * 60 * 60 * 1000;
   const SEND_TIMEOUT = 40000;
-  const PING_TIMEOUT = 15000;
+  const PING_TIMEOUT = 10000;
   const BATCH = 15;
+  const MAX_FLUSH_FAILURES = 3;
 
   let syncLock = null;
 
@@ -435,8 +436,13 @@ APP.API = (() => {
               : r
           );
           write(list, true);
+          failures += 1;
+          if (failures >= MAX_FLUSH_FAILURES) {
+            return { sent, left: lotPendingCount(), reason: "partial", reports: pendingCount() };
+          }
+        } else {
+          failures = 0;
         }
-        failures = 0;
       } catch (_) {
         const list = all().map((r) =>
           ids.includes(r.clientId)
@@ -445,11 +451,14 @@ APP.API = (() => {
         );
         write(list, true);
         failures += 1;
-        await tick(Math.min(8000, 700 * Math.pow(2, failures - 1)));
+        if (failures >= MAX_FLUSH_FAILURES) {
+          return { sent, left: lotPendingCount(), reason: "net", reports: pendingCount() };
+        }
+        await tick(Math.min(2500, 600 * failures));
         const again = await probe();
         if (!again.ok) break;
       }
-      await tick(350);
+      await tick(200);
     }
     const left = lotPendingCount();
     if (left === 0) clearOutboxReport(turnoCampo);

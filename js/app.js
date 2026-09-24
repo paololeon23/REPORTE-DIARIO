@@ -6,13 +6,13 @@ APP.App = (() => {
 
   const state = {
     session: {
-      scannerDni: "48055477",
-      scannerNombre: "ZAVALETA GONZALES LUSBET ERELID",
-      supervisorDni: "48533707",
-      supervisorNombre: "JULCA GAMBOA DILMER ELICER",
-      jornales: 36,
-      grupo: "2",
-      etapa: "1",
+      scannerDni: "",
+      scannerNombre: "",
+      supervisorDni: "",
+      supervisorNombre: "",
+      jornales: 0,
+      grupo: "",
+      etapa: "",
       turnoCampo: "Mañana",
     },
     lote: null,
@@ -159,7 +159,7 @@ APP.App = (() => {
       if (name) state.session.scannerNombre = name;
       scan.textContent = name || "Seleccionar…";
     }
-    if (jn) jn.value = String(state.session.jornales || 0);
+    if (jn) jn.value = state.session.jornales > 0 ? String(state.session.jornales) : "";
     const envios = APP.API.sendCount(state.session.supervisorDni);
     if (!opts || !opts.keepTurno) syncTurnoCampo();
     const turno = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
@@ -583,6 +583,7 @@ APP.App = (() => {
       await APP.Data.load();
       APP.PreciseSelect.open({
         title: "Supervisor",
+        placeholder: "Buscar DNI o nombre…",
         getOptions: (q) => APP.Data.supervisorOptions(q),
         onSelect: async (opt) => {
           const nextDni = String(opt.dni || opt.id || "");
@@ -610,7 +611,7 @@ APP.App = (() => {
       await APP.Data.load();
       APP.PreciseSelect.open({
         title: "Escáner",
-        placeholder: "Nombre o DNI",
+        placeholder: "Buscar DNI o nombre…",
         empty: "Sin resultados. Escribe el DNI de 8 dígitos para ingresarlo.",
         allowManual: true,
         findKnown: (dni) => APP.Data.findScanner(dni),
@@ -1189,6 +1190,30 @@ APP.App = (() => {
       });
       paintStatus();
 
+      // Sin internet: pendiente al toque, sin loader ni “Enviando…”.
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        if (!auto) {
+          await feedback(
+            "Quedó pendiente",
+            `${totalTxt}. Sigue trabajando. Cuando haya señal, pulsa Enviar otra vez.`,
+            { ms: 2400 }
+          );
+        }
+        return;
+      }
+
+      const live = await APP.API.probe();
+      if (!live || !live.ok) {
+        if (!auto) {
+          await feedback(
+            "Quedó pendiente",
+            `${totalTxt}. El servidor no respondió. Tus lotes siguen en el celular.`,
+            { ms: 2400 }
+          );
+        }
+        return;
+      }
+
       showLoader("Enviando", isSecond ? "Enviando el reporte de tarde…" : "Enviando el reporte de mañana…");
       const result = await APP.API.flush({
         summary: totalTxt,
@@ -1202,11 +1227,12 @@ APP.App = (() => {
       paintStatus();
       hideLoader();
 
-      if (result.reason === "no-ep" || result.reason === "offline" || result.reason === "net" || result.reason === "http") {
+      if (result.reason === "no-ep" || result.reason === "offline" || result.reason === "net" || result.reason === "http" || result.reason === "partial") {
         if (!auto) {
           await feedback(
-            "Sin señal",
-            `El reporte quedó pendiente (${totalTxt}). Puedes seguir trabajando. Cuando haya red, pulsa Enviar otra vez.`
+            "Quedó pendiente",
+            `${totalTxt}. Puedes seguir trabajando. Cuando haya red, pulsa Enviar otra vez.`,
+            { ms: 2400 }
           );
         }
         return;
@@ -1293,15 +1319,11 @@ APP.App = (() => {
 
     autoSyncBusy = true;
     try {
-      const live = await APP.API.probe();
-      if (!live || !live.ok) {
-        if (hasInterruptedSend()) scheduleAutoSync(60000);
-        return;
-      }
+      // Un solo camino: transferMode → flush (ahí hace el probe). Sin doble ping.
       await transferMode({ auto: true });
-      if (hasInterruptedSend()) scheduleAutoSync(60000);
+      if (hasInterruptedSend()) scheduleAutoSync(45000);
     } catch (_) {
-      if (hasInterruptedSend()) scheduleAutoSync(60000);
+      if (hasInterruptedSend()) scheduleAutoSync(45000);
     } finally {
       autoSyncBusy = false;
       paintStatus();

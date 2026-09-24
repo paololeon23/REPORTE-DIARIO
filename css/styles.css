@@ -755,51 +755,138 @@ body.is-desktop .qb-sync {
 .empty { color: var(--muted); font-weight: 600; font-size: 0.82rem; }
 
 .overlay {
-  position: fixed; inset: 0; background: rgba(8, 24, 40, 0.45);
-  display: none; z-index: 60; align-items: flex-end; justify-content: center;
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 24, 40, 0.42);
+  display: none;
+  z-index: 60;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 14px calc(16px + var(--safe-bottom));
 }
 .overlay.open { display: flex; }
 .precise-modal {
-  width: 100%; max-width: 560px; max-height: 80dvh;
-  background: #fff; border-radius: 18px 18px 0 0;
-  display: flex; flex-direction: column; overflow: hidden;
+  width: min(420px, 100%);
+  max-height: min(78dvh, 640px);
+  background: #fff;
+  border-radius: 22px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(8, 24, 40, 0.18);
 }
 .precise-modal-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 16px; border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 8px;
+  border-bottom: 0;
 }
 .precise-modal-head h3 {
-  font-size: 0.95rem;
+  margin: 0;
+  font-size: 1.12rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  color: #1B5E20;
+  line-height: 1.2;
 }
-.precise-search { display: flex; align-items: center; gap: 8px; padding: 10px 16px; flex-shrink: 0; }
+.precise-modal-head #ps-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 1px solid #E3E8E4;
+  background: #F7FAF8;
+  color: #5A6B5E;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+.precise-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 16px 10px;
+  padding: 0 14px;
+  height: 48px;
+  border: 1px solid #E3E8E4;
+  border-radius: 14px;
+  background: #F7FAF8;
+  flex-shrink: 0;
+}
+.precise-search-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #8A9690;
+}
 .precise-search input {
-  flex: 1; height: 42px; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px;
+  flex: 1;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #1E2A22;
+}
+.precise-search input::placeholder {
+  color: #8A9690;
+  font-weight: 600;
 }
 .precise-list {
   flex: 1;
-  min-height: 180px;
+  min-height: 160px;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 0 8px calc(16px + var(--safe-bottom));
+  padding: 4px 14px 16px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
 .precise-opt {
-  width: 100%; text-align: left; padding: 12px;
-  border-bottom: 1px solid var(--line); display: grid;
+  width: 100%;
+  text-align: left;
+  padding: 14px 14px;
+  border: 1px solid #E3E8E4;
+  border-radius: 14px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
   font-weight: 700;
   letter-spacing: -0.015em;
+  box-shadow: none;
+}
+.precise-opt:active {
+  background: #F3F8F4;
+  border-color: #CDE3D1;
 }
 .precise-opt strong {
   white-space: normal;
   line-height: 1.25;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  word-break: break-word;
+  color: #1B5E20;
 }
-.precise-opt small { color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.precise-opt small {
+  color: #7A8A7E;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
 .precise-opt.marked {
-  background: #E7F4EA;
-  border-left: 4px solid #1B5E20;
+  background: #EEF7F0;
+  border-color: #1B5E20;
+  border-left: 1px solid #1B5E20;
 }
 .precise-opt:not(.marked) {
   background: #fff;
@@ -811,6 +898,11 @@ body.is-desktop .qb-sync {
 .precise-opt.marked small:not(.precise-note) {
   color: #4A5C4F;
   font-weight: 600;
+}
+.precise-list .empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: #7A8A7E;
 }
 .precise-manual {
   display: grid;

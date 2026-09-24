@@ -3,18 +3,18 @@ window.APP = window.APP || {};
 
 APP.Data = (() => {
   let scanners = {
-    "48055477": { nombre: "ZAVALETA GONZALES LUSBET ERELID" },
-    "18078464": { nombre: "LOYOLA DOMINGUEZ OSWALDO ELMER" },
-    "41520670": { nombre: "VASQUEZ SANCHEZ JOSE ISIDRO" },
-    "41809717": { nombre: "DIAZ SALAZAR OLGA ELIZABETH" },
-    "44932896": { nombre: "PAREDES MANTILLA GINA IVONNE" },
-    "77799828": { nombre: "ZAVALETA IGLESIAS KAHORY MARIANELA" },
-    "40354659": { nombre: "REYES JAVE LOURDES LIZETH" },
-    "44262821": { nombre: "CHAVEZ CABRERA MARIBEL VICENTA" },
-    "45123552": { nombre: "LINARES CERNA OSCAR PAUL" },
-    "46819781": { nombre: "PEREZ LEON SALLY ELIZABETH" },
-    "47188311": { nombre: "PEREIRA VASQUEZ LUCELIA LEONORA" },
-    "47407697": { nombre: "ROLDAN PEREZ JULIO ANTONIO" },
+    "48055477": { nombre: "ZAVALETA GONZALES LUSBET ERELID", cargo: "SCANER" },
+    "18078464": { nombre: "LOYOLA DOMINGUEZ OSWALDO ELMER", cargo: "SCANER" },
+    "41520670": { nombre: "VASQUEZ SANCHEZ JOSE ISIDRO", cargo: "SCANER" },
+    "41809717": { nombre: "DIAZ SALAZAR OLGA ELIZABETH", cargo: "SCANER" },
+    "44932896": { nombre: "PAREDES MANTILLA GINA IVONNE", cargo: "SCANER" },
+    "77799828": { nombre: "ZAVALETA IGLESIAS KAHORY MARIANELA", cargo: "SCANER" },
+    "40354659": { nombre: "REYES JAVE LOURDES LIZETH", cargo: "SCANER" },
+    "44262821": { nombre: "CHAVEZ CABRERA MARIBEL VICENTA", cargo: "SCANER" },
+    "45123552": { nombre: "LINARES CERNA OSCAR PAUL", cargo: "SCANER" },
+    "46819781": { nombre: "PEREZ LEON SALLY ELIZABETH", cargo: "SCANER" },
+    "47188311": { nombre: "PEREIRA VASQUEZ LUCELIA LEONORA", cargo: "SCANER" },
+    "47407697": { nombre: "ROLDAN PEREZ JULIO ANTONIO", cargo: "SCANER" },
   };
 
   let supervisors = {
@@ -48,40 +48,101 @@ APP.Data = (() => {
     return String(nombre || "").trim();
   }
 
+  let scannerIndex = null;
+  let supervisorIndex = null;
+
   function fullName(dni, fallback) {
     const id = String(dni || "").trim();
     const hit = (id && supervisors[id]) || (id && scanners[id]);
     return displayName((hit && hit.nombre) || fallback);
   }
 
-  function personOptions(map, query, limits) {
-    const minList = limits && limits.minList != null ? limits.minList : 9999;
-    const maxList = limits && limits.limit != null ? limits.limit : 9999;
-    const q = String(query || "").trim().toLowerCase();
-    const digits = String(query || "").replace(/\D/g, "");
-    const out = [];
+  function rebuildPersonIndex(map) {
+    const list = [];
     const keys = Object.keys(map || {});
+    for (let i = 0; i < keys.length; i++) {
+      const dni = keys[i];
+      const row = map[dni] || {};
+      const nombre = String(row.nombre || "");
+      const cargo = String(row.cargo || row.puesto || "").toUpperCase();
+      list.push({
+        dni,
+        nombre,
+        cargo,
+        label: displayName(nombre),
+        nombreLower: nombre.toLowerCase(),
+        isScaner: cargo.indexOf("SCAN") === 0,
+      });
+    }
+    list.sort((a, b) => {
+      if (a.isScaner !== b.isScaner) return a.isScaner ? -1 : 1;
+      return a.label.localeCompare(b.label, "es");
+    });
+    return list;
+  }
+
+  function ensureScannerIndex() {
+    if (!scannerIndex) scannerIndex = rebuildPersonIndex(scanners);
+    return scannerIndex;
+  }
+
+  function ensureSupervisorIndex() {
+    if (!supervisorIndex) supervisorIndex = rebuildPersonIndex(supervisors);
+    return supervisorIndex;
+  }
+
+  function personOptionsFromIndex(index, query, limits) {
+    const minList = limits && limits.minList != null ? limits.minList : 40;
+    const maxList = limits && limits.limit != null ? limits.limit : 60;
+    const preferScaner = !!(limits && limits.preferScaner);
+    const raw = String(query || "").trim();
+    const q = raw.toLowerCase();
+    const digits = raw.replace(/\D/g, "");
+    const out = [];
+
     if (!q) {
-      const n = Math.min(keys.length, minList);
-      for (let i = 0; i < n; i++) {
-        const dni = keys[i];
-        const nombre = (map[dni] && map[dni].nombre) || "";
-        out.push({ id: dni, label: displayName(nombre), meta: dni, dni, nombre });
+      for (let i = 0; i < index.length && out.length < minList; i++) {
+        const row = index[i];
+        if (preferScaner && !row.isScaner && out.length >= Math.min(minList, 28)) break;
+        out.push({ id: row.dni, label: row.label, meta: row.dni, dni: row.dni, nombre: row.nombre });
+      }
+      if (preferScaner && out.length < minList) {
+        for (let i = 0; i < index.length && out.length < minList; i++) {
+          const row = index[i];
+          if (row.isScaner) continue;
+          out.push({ id: row.dni, label: row.label, meta: row.dni, dni: row.dni, nombre: row.nombre });
+        }
       }
       return out;
     }
-    for (let i = 0; i < keys.length; i++) {
-      const dni = keys[i];
-      const nombre = (map[dni] && map[dni].nombre) || "";
-      const full = displayName(nombre);
-      const byDni = digits.length >= 1 && dni.includes(digits);
-      const byName = nombre.toLowerCase().includes(q) || full.toLowerCase().includes(q);
-      if (!byDni && !byName) continue;
-      out.push({ id: dni, label: full, meta: dni, dni, nombre });
+
+    // DNI exacto primero (rápido)
+    if (digits.length === 8) {
+      for (let i = 0; i < index.length; i++) {
+        if (index[i].dni === digits) {
+          const row = index[i];
+          return [{ id: row.dni, label: row.label, meta: row.dni, dni: row.dni, nombre: row.nombre }];
+        }
+      }
+    }
+
+    const onlyDigits = digits.length > 0 && digits === raw.replace(/\s/g, "");
+    for (let i = 0; i < index.length; i++) {
+      const row = index[i];
+      let ok = false;
+      if (digits.length >= 1 && row.dni.indexOf(digits) !== -1) ok = true;
+      else if (!onlyDigits && (row.nombreLower.indexOf(q) !== -1 || row.label.toLowerCase().indexOf(q) !== -1)) ok = true;
+      if (!ok) continue;
+      out.push({ id: row.dni, label: row.label, meta: row.dni, dni: row.dni, nombre: row.nombre });
       if (out.length >= maxList) break;
     }
-    out.sort((a, b) => a.label.localeCompare(b.label, "es"));
     return out;
+  }
+
+  function personOptions(map, query, limits) {
+    const preferScaner = !!(limits && limits.preferScaner);
+    const index = preferScaner || map === scanners ? ensureScannerIndex() : map === supervisors ? ensureSupervisorIndex() : rebuildPersonIndex(map);
+    return personOptionsFromIndex(index, query, limits);
   }
 
   function findPerson(map, raw) {
@@ -264,6 +325,7 @@ APP.Data = (() => {
     const sup = window.APP_SUPERVISORES;
     if (sup && sup.byDni && Object.keys(sup.byDni).length) {
       supervisors = { ...supervisors, ...sup.byDni };
+      supervisorIndex = null;
     }
     if (window.APP_PLANO && Array.isArray(window.APP_PLANO.lots)) {
       applyMapData(window.APP_PLANO);
@@ -279,6 +341,7 @@ APP.Data = (() => {
     const byDni = json && json.byDni;
     if (!byDni || !Object.keys(byDni).length) return;
     scanners = { ...scanners, ...byDni };
+    scannerIndex = null;
     loadExtras();
   }
 
@@ -301,8 +364,9 @@ APP.Data = (() => {
       Object.keys(raw).forEach((dni) => {
         const id = cleanDni(dni);
         const nombre = cleanNombre((raw[dni] && raw[dni].nombre) || raw[dni]);
-        if (id.length === 8 && nombre) scanners[id] = { nombre };
+        if (id.length === 8 && nombre) scanners[id] = { nombre, cargo: "SCANER" };
       });
+      scannerIndex = null;
     } catch (e) {}
   }
 
@@ -310,7 +374,8 @@ APP.Data = (() => {
     const id = cleanDni(dni);
     const name = cleanNombre(nombre);
     if (id.length !== 8 || name.length < 3) return null;
-    scanners[id] = { nombre: name };
+    scanners[id] = { nombre: name, cargo: "SCANER" };
+    scannerIndex = null;
     try {
       const raw = JSON.parse(localStorage.getItem(EXTRA_KEY) || "{}");
       raw[id] = { nombre: name };
@@ -435,8 +500,8 @@ APP.Data = (() => {
     load,
     findLote,
     loteOptions,
-    scannerOptions: (q) => personOptions(scanners, q, { minList: 40, limit: 80 }),
-    supervisorOptions: (q) => personOptions(supervisors, q),
+    scannerOptions: (q) => personOptions(scanners, q, { minList: 40, limit: 60, preferScaner: true }),
+    supervisorOptions: (q) => personOptions(supervisors, q, { minList: 40, limit: 60 }),
     findScanner: (id) => findPerson(scanners, id),
     findSupervisor: (id) => findPerson(supervisors, id),
     addScanner,

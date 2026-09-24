@@ -19,7 +19,10 @@ APP.PreciseSelect = (() => {
           <button type="button" id="ps-close" aria-label="Cerrar">✕</button>
         </div>
         <div class="precise-search">
-          <input type="search" id="ps-search" placeholder="Buscar" autocomplete="off" inputmode="search" />
+          <svg class="precise-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+          </svg>
+          <input type="search" id="ps-search" placeholder="Buscar DNI o nombre…" autocomplete="off" inputmode="search" />
         </div>
         <div class="precise-list" id="ps-list"></div>
         <div class="precise-manual" id="ps-manual" hidden>
@@ -48,7 +51,18 @@ APP.PreciseSelect = (() => {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) close();
     });
-    searchEl.addEventListener("input", () => paint(searchEl.value));
+    let searchTick = 0;
+    searchEl.addEventListener("input", () => {
+      const q = searchEl.value;
+      if (searchTick) clearTimeout(searchTick);
+      // DNI: responde al toque. Nombre: 60ms para no trabar el teclado.
+      const digits = String(q || "").replace(/\D/g, "");
+      const delay = digits.length >= 1 && digits === String(q || "").replace(/\s/g, "") ? 0 : 60;
+      searchTick = setTimeout(() => {
+        searchTick = 0;
+        paint(q);
+      }, delay);
+    });
     bindManual();
   }
 
@@ -119,13 +133,18 @@ APP.PreciseSelect = (() => {
     const opts = getOptions(q) || [];
     listEl.innerHTML = opts.length
       ? opts
-          .map(
-            (o) => `<button type="button" class="precise-opt${o.marked ? " marked" : ""}" data-id="${String(o.id).replace(/"/g, "")}">
-          <strong>${o.label}</strong>${o.note ? `<small class="precise-note">${o.note}</small>` : ""}${o.meta ? `<small>${o.meta}</small>` : ""}
-        </button>`
-          )
+          .map((o) => {
+            const metaRaw = String(o.meta || "").trim();
+            const meta =
+              metaRaw && /^\d{6,8}$/.test(metaRaw.replace(/\D/g, "")) && metaRaw.replace(/\D/g, "").length === 8
+                ? "DNI - " + metaRaw.replace(/\D/g, "")
+                : metaRaw;
+            return `<button type="button" class="precise-opt${o.marked ? " marked" : ""}" data-id="${String(o.id).replace(/"/g, "")}">
+          <strong>${o.label}</strong>${o.note ? `<small class="precise-note">${o.note}</small>` : ""}${meta ? `<small>${meta}</small>` : ""}
+        </button>`;
+          })
           .join("")
-      : `<p class="empty" style="padding:12px">${emptyText}</p>`;
+      : `<p class="empty">Sin resultados</p>`;
     listEl.querySelectorAll(".precise-opt").forEach((btn) => {
       btn.onclick = () => {
         const opt = opts.find((o) => String(o.id) === btn.dataset.id);
@@ -144,7 +163,7 @@ APP.PreciseSelect = (() => {
     emptyText = cfg.empty || "Sin resultados";
     allowManual = !!cfg.allowManual;
     findKnown = cfg.findKnown || null;
-    searchEl.placeholder = cfg.placeholder || "Buscar";
+    searchEl.placeholder = cfg.placeholder || "Buscar DNI o nombre…";
     searchEl.value = "";
     dniEl.value = "";
     nombreEl.value = "";
