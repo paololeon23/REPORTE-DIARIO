@@ -3,45 +3,87 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0B3A66" />
+  <meta name="theme-color" content="#FFFFFF" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Cosecha" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="description" content="Q Berries — Reporte diario de cosecha" />
   <title>Q Berries · Cosecha</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.0.73" />
+  <link rel="stylesheet" href="css/styles.css?v=2.0.73" />
+  <script>
+    (function () {
+      function isLocalHost() {
+        var h = location.hostname || "";
+        return h === "127.0.0.1" || h === "localhost" || h === "::1";
+      }
+      function allowMobileOrTablet() {
+        if (isLocalHost()) return true;
+        var ua = navigator.userAgent || "";
+        var touch = navigator.maxTouchPoints > 0 || "ontouchstart" in window;
+        if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Kindle|Silk/i.test(ua)) {
+          return true;
+        }
+        if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
+        var w = Math.min(window.innerWidth || 0, screen.width || 9999);
+        var h = Math.min(window.innerHeight || 0, screen.height || 9999);
+        var shortSide = Math.min(w, h);
+        var longSide = Math.max(w, h);
+        if (touch && shortSide <= 900 && longSide <= 1400) return true;
+        return false;
+      }
+      if (!allowMobileOrTablet()) {
+        document.documentElement.classList.add("is-desktop");
+      } else {
+        document.addEventListener("DOMContentLoaded", function () {
+          var gate = document.getElementById("desktop-gate");
+          if (gate) gate.remove();
+        });
+      }
+    })();
+  </script>
 </head>
 <body>
-  <div class="qb-loader" id="qb-loader" hidden>
-    <div class="qb-loader-card"><span class="qb-spinner"></span><p id="qb-loader-text">Guardando…</p></div>
-  </div>
-  <div class="qb-fb" id="qb-fb" hidden>
-    <div class="qb-fb-sheet">
-      <strong id="qb-fb-title"></strong>
-      <p id="qb-fb-text"></p>
-      <div class="qb-fb-actions" id="qb-fb-actions"></div>
-    </div>
-  </div>
-
   <div class="app">
-    <header class="topbar">
-      <img class="brand-logo" src="assets/logo-qberries.png" alt="Q Berries" />
-      <div class="topbar-actions">
-        <div class="status-chip" id="chip-online"><span class="dot"></span><span>En línea</span></div>
-        <span class="date-chip" id="chip-fecha"></span>
+    <header class="corp-header">
+      <div class="corp-left">
+        <img class="corp-logo" src="assets/logo-qberries.png" alt="Q Berries" width="56" height="56" draggable="false" />
+        <div class="corp-titles">
+          <div class="corp-brand">Q BERRIES</div>
+          <h1 class="corp-title">Reporte de cosecha</h1>
+          <p class="corp-sub">Registro de campo</p>
+        </div>
       </div>
+      <div class="status-stack" data-status-bar>
+        <div class="status-chip online" id="chip-online" title="Estado de conexión">
+          <span class="dot"></span>
+          <span class="chip-text">En línea</span>
+        </div>
+        <button type="button" class="status-chip pending" id="chip-pending" title="Pendientes">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <path d="M12 16V8M8 11l4-4 4 4"/>
+            <path d="M5 18h14a2 2 0 0 0 2-2v-1a4 4 0 0 0-3.2-3.9A6 6 0 0 0 6.1 9.2 4 4 0 0 0 5 13v3a2 2 0 0 0 2 2z" opacity=".35"/>
+          </svg>
+          <span class="chip-text" id="chip-pending-text">0 pend.</span>
+        </button>
+        </div>
     </header>
 
     <main class="panel-scroll">
       <section class="card">
-        <h2>Equipo del día</h2>
+        <div class="block-head">
+          <h2 class="block-title">Equipo del día</h2>
+          <p class="block-sub">Supervisor, escáner y jornales.</p>
+        </div>
         <button type="button" class="pick-row" id="trig-supervisor">
           <small>Supervisor</small>
           <span id="lbl-supervisor">Seleccionar…</span>
         </button>
+        <p class="send-count" id="lbl-envios">0 / 2 envíos hoy</p>
         <button type="button" class="pick-row" id="trig-scanner">
           <small>Escáner</small>
           <span id="lbl-scanner">Seleccionar…</span>
@@ -50,10 +92,23 @@
           <small>Jornales (personas)</small>
           <input id="inp-jornales" inputmode="numeric" value="36" />
         </label>
+        <div class="field-num turno-campo" id="sel-turno-campo">
+          <small>Turno campo</small>
+          <button type="button" class="turno-select-btn" id="btn-turno-campo" aria-haspopup="listbox" aria-expanded="false" aria-controls="menu-turno-campo">
+            <span id="lbl-turno-campo">Mañana</span>
+          </button>
+          <div class="turno-select-menu" id="menu-turno-campo" role="listbox" hidden>
+            <button type="button" class="turno-select-opt on" data-turno="Mañana" role="option" aria-selected="true">Mañana</button>
+            <button type="button" class="turno-select-opt" data-turno="Tarde" role="option" aria-selected="false">Tarde</button>
+          </div>
+        </div>
       </section>
 
       <section class="card" id="lote-card">
-        <h2>Registrar lote</h2>
+        <div class="block-head">
+          <h2 class="block-title">Registrar lote</h2>
+          <p class="block-sub" id="lote-sub">Lote, avance y jarras del día.</p>
+        </div>
         <button type="button" class="pick-row" id="trig-lote">
           <small>Lote</small>
           <span id="lbl-lote">Seleccionar lote…</span>
@@ -68,6 +123,7 @@
           <small>Avance (ha)</small>
           <input id="inp-avance" inputmode="decimal" placeholder="0" />
         </label>
+        <p class="avance-min" id="avance-min" hidden></p>
 
         <p class="check-label">¿Con qué trabajó?</p>
         <div class="checks">
@@ -102,19 +158,121 @@
       </section>
 
       <section class="card">
-        <h2>Hoy</h2>
+        <div class="block-head">
+          <h2 class="block-title">Hoy</h2>
+          <p class="block-sub">Totales y reporte Excel.</p>
+        </div>
+        <div class="hoy-actions">
+          <button type="button" class="hoy-btn" id="btn-historial">Historial</button>
+          <button type="button" class="hoy-btn dark" id="btn-sync">Sync</button>
+        </div>
         <div class="day-kpis" id="day-kpis"></div>
         <div class="lot-list" id="lot-list"></div>
-        <button type="button" class="btn-ghost" id="btn-export">Exportar Excel</button>
+        <button type="button" class="btn-ghost" id="btn-export">Ver resumen</button>
       </section>
     </main>
   </div>
 
-  <script src="js/config.js"></script>
-  <script src="js/data.js"></script>
-  <script src="js/select.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/excel.js"></script>
-  <script src="js/app.js"></script>
+  <div class="desktop-gate" id="desktop-gate" aria-live="polite" inert>
+    <div class="desktop-gate-bg" aria-hidden="true">
+      <span class="orb orb-a"></span>
+      <span class="orb orb-b"></span>
+      <span class="orb orb-c"></span>
+    </div>
+    <div class="desktop-gate-inner">
+      <img class="desktop-gate-logo" src="assets/logo-qberries.png" alt="Q Berries" width="88" height="88" />
+      <p class="desktop-gate-brand">Q BERRIES</p>
+      <h1>Solo en celular o tablet</h1>
+      <p class="desktop-gate-lead">El reporte de cosecha está hecho para campo. En computadora no se puede usar.</p>
+      <div class="desktop-gate-devices" aria-hidden="true">
+        <span class="desktop-gate-device phone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+          Celular
+        </span>
+        <span class="desktop-gate-device tablet">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M11 17h2"/></svg>
+          Tablet
+        </span>
+      </div>
+      <p class="desktop-gate-hint">Abre el mismo enlace desde tu teléfono o tablet e instálala en la pantalla de inicio.</p>
+    </div>
+  </div>
+
+  <div class="qb-loader" id="qb-loader" hidden>
+    <div class="qb-loader-card"><span class="qb-spinner"></span><p id="qb-loader-text">Guardando…</p></div>
+  </div>
+  <div class="qb-fb" id="qb-fb" hidden>
+    <div class="qb-fb-sheet">
+      <strong id="qb-fb-title"></strong>
+      <p id="qb-fb-text"></p>
+      <div class="qb-fb-actions" id="qb-fb-actions"></div>
+    </div>
+  </div>
+  <div class="qb-export" id="qb-export" hidden>
+    <div class="qb-export-sheet" role="dialog" aria-modal="true" aria-labelledby="export-title">
+      <header class="qb-export-head">
+        <div>
+          <p class="qb-export-kicker">Reporte del día</p>
+          <h2 id="export-title">Excel de cosecha</h2>
+        </div>
+        <button type="button" class="qb-export-close" id="btn-export-close" aria-label="Cerrar">×</button>
+      </header>
+      <div class="export-card" id="export-preview"></div>
+      <button type="button" class="export-send" id="btn-export-send">Enviar</button>
+      <div class="export-row">
+        <button type="button" class="export-choice" id="btn-export-share">Exportar</button>
+        <button type="button" class="export-choice ghost" id="btn-export-dl">Descargar</button>
+      </div>
+      <p class="export-hint">Enviar manda el total del reporte más cada lote. Si no hay señal, queda 1 pendiente y puedes seguir trabajando.</p>
+    </div>
+  </div>
+
+  <div class="hist-view" id="view-historial" hidden>
+    <header class="hist-header">
+      <button type="button" class="hist-back" id="btn-hist-back" aria-label="Volver">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <div class="hist-titles">
+        <p class="hist-lead">Últimas 24 horas</p>
+        <h1>Historial</h1>
+      </div>
+    </header>
+    <div class="hist-scroll">
+      <p class="hist-lead">Los Excel quedan 24 horas en el celular.</p>
+      <div class="hist-list" id="hist-list"></div>
+    </div>
+  </div>
+
+  <div class="qb-sync" id="qb-sync" hidden>
+    <div class="qb-sync-sheet" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+      <header class="qb-sync-head">
+        <div>
+          <p>CELULAR</p>
+          <h2 id="sync-title">Sync seguro</h2>
+        </div>
+        <button type="button" class="qb-export-close" id="btn-sync-close" aria-label="Cerrar">×</button>
+      </header>
+      <div class="sync-version">Versión <b id="sync-version">v2.0.73</b></div>
+      <button type="button" class="sync-action" id="btn-update">
+        <strong>Actualizar app</strong>
+        <small>Baja la última versión de la nube</small>
+      </button>
+      <button type="button" class="sync-action" id="btn-transfer">
+        <strong>Enviar / transferir</strong>
+        <small>Mañana o turno completo</small>
+      </button>
+      <button type="button" class="hoy-btn" id="btn-wipe">Eliminar caché</button>
+    </div>
+  </div>
+
+  <script src="js/config.js?v=2.0.73"></script>
+  <script src="js/catalog-lotes.js?v=2.0.73"></script>
+  <script src="js/catalog-supervisores.js?v=2.0.73"></script>
+  <script src="js/catalog-plano.js?v=2.0.73"></script>
+  <script src="js/data.js?v=2.0.73"></script>
+  <script src="js/select.js?v=2.0.73"></script>
+  <script src="js/api.js?v=2.0.73"></script>
+  <script src="js/excel.js?v=2.0.73"></script>
+  <script src="js/app.js?v=2.0.73"></script>
 </body>
 </html>

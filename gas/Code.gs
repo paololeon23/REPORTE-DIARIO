@@ -1,38 +1,769 @@
 var TZ = 'America/Lima';
-var JARRA_KG = 1.16;
-var SHEET = 'Produccion';
+var JARRA_KG = 1.14;
+var LOG = '_lotes';
+var RESP = 'Responsables';
+var RESPONSABLE_FIJO = 'Luis Verde';
+var GREEN = '#1B5E20';
 var HEADERS = [
   'Fecha', 'Scanner', 'Scanner DNI', 'Supervisor', 'Supervisor DNI',
   'Grupo', 'Etapa', 'Lote', 'Fundo', 'Variedad', 'MD', 'Turno', 'Area', 'Avance',
-  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China', 'Total Jarras', 'Total Kg', 'Jornales', 'ClientId'
+  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China', 'Total Jarras', 'Total Kg', 'Jornales', 'ClientId', 'TurnoCampo', 'Hora envío', 'Hora registro'
 ];
+var RESUMEN_HEADERS = [
+  'Semana', 'Fecha', 'Tipo', 'Fundo', 'Módulo', 'Variedad', 'Turno',
+  'Envase', 'Calibre', 'Responsable', 'Frecuencia',
+  'Área', 'Jornales', 'Kilos', 'Kg/ha', 'Kg/Jornales', 'Hora registro'
+];
+var RESP_HEADERS = [
+  'Fecha', 'Supervisor', 'Supervisor DNI', 'Turno campo', 'Jarras', 'Kilos', 'Hora registro'
+];
+
+function jsonOut_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.ping) return jsonOut_({ ok: true, pong: true });
+  return jsonOut_({ ok: true });
+}
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  lock.waitLock(30000);
   try {
-    var body = JSON.parse(e.postData.contents);
+    var raw = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
+    var body = JSON.parse(raw);
     var ss = SpreadsheetApp.getActive();
-    var sh = ss.getSheetByName(SHEET) || ss.insertSheet(SHEET);
-    if (sh.getLastRow() === 0) sh.appendRow(HEADERS);
-    var recs = body.action === 'batchSave' ? (body.records || []) : [body];
-    recs.forEach(function (item) {
-      var d = item.data || {};
-      sh.appendRow([
-        d.fecha, d.scanner, d.scannerDni, d.supervisor, d.supervisorDni,
-        d.grupo, d.etapa, d.lote, d.fundo, d.variedad, d.md, d.turno, d.area, d.avance,
-        d.jarrasConv, d.kgConv, d.jarrasChina, d.kgChina, d.totalJarras, d.totalKg, d.jornales, item.clientId
-      ]);
-    });
-    return ContentService.createTextOutput(JSON.stringify({ ok: true })).setMimeType(ContentService.MimeType.JSON);
+    var sh = logSheet_(ss);
+    var recs = normalizeRecs_(body);
+    var headers = ensureHeaders_(sh);
+    var result = upsertBatch_(sh, recs, headers);
+    if (body.rebuild !== false && result.changed && result.fechas.length) {
+      rebuildDays_(ss, headers, result.values, result.fechas);
+      rebuildResponsables_(ss, headers, result.values, result.fechas);
+    }
+    return jsonOut_({ ok: true, accepted: result.accepted, existing: result.existing });
+  } catch (err) {
+    return jsonOut_({ ok: false, error: String(err) });
   } finally {
-    lock.releaseLock();
+    try { lock.releaseLock(); } catch (e2) {}
   }
+}
+
+function normalizeRecs_(body) {
+  if (!body) return [];
+  if (body.action === 'batchSave' && body.records) return body.records;
+  if (Object.prototype.toString.call(body.records) === '[object Array]') return body.records;
+  if (body.data) return [{ clientId: body.clientId || body.data.clientId, data: body.data }];
+  return [body];
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Q Berries')
+    .addItem('Actualizar resumen', 'rebuildResumen')
+    .addItem('Preparar hojas', 'setupSheets')
+    .addToUi();
+}
+
+function logSheet_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  migrateProduccion_(ss);
+  var sh = ss.getSheetByName(LOG);
+  if (!sh) sh = ss.insertSheet(LOG);
+  try { sh.hideSheet(); } catch (e) {}
+  return sh;
+}
+
+function migrateProduccion_(ss) {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('mig_prod_v1') === '1' && !ss.getSheetByName('Produccion')) return;
+  var old = ss.getSheetByName('Produccion');
+  if (!old) {
+    props.setProperty('mig_prod_v1', '1');
+    return;
+  }
+  var dest = ss.getSheetByName(LOG);
+  if (!dest) dest = ss.insertSheet(LOG);
+  if (old.getLastRow() > 0 && dest.getLastRow() < 2) {
+    var rng = old.getDataRange();
+    dest.getRange(1, 1, rng.getNumRows(), rng.getNumColumns()).setValues(rng.getValues());
+  }
+  if (ss.getSheets().length > 1) {
+    try { ss.deleteSheet(old); } catch (e) {}
+  }
+  props.setProperty('mig_prod_v1', '1');
 }
 
 function setupSheets() {
   var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName(SHEET) || ss.insertSheet(SHEET);
+  var sh = logSheet_(ss);
+  ensureHeaders_(sh);
+  ensureRespSheet_(ss);
+  rebuildResumen();
+}
+
+function ensureHeaders_(sh) {
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    return HEADERS.slice();
+  }
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  HEADERS.forEach(function (name) {
+    if (have.indexOf(name) === -1) {
+      sh.getRange(1, have.length + 1).setValue(name);
+      have.push(name);
+    }
+  });
+  return have;
+}
+
+function col_(headers, name) {
+  var i = headers.indexOf(name);
+  return i < 0 ? -1 : i;
+}
+
+function cell_(row, headers, name) {
+  var i = col_(headers, name);
+  return i < 0 ? '' : row[i];
+}
+
+function normTurno_(v) {
+  return /tarde/i.test(String(v || '')) ? 'Tarde' : 'Mañana';
+}
+
+function fallbackKey_(fecha, lote, turnoCampo, supervisorDni) {
+  var f = toIsoFecha_(fecha);
+  var l = String(lote || '').trim();
+  var s = String(supervisorDni || '').trim();
+  if (!f || !l || !s) return '';
+  return f + '|' + l + '|' + normTurno_(turnoCampo) + '|' + s;
+}
+
+function fallbackKeyFromData_(d) {
+  return fallbackKey_(d.fecha, d.lote, d.turnoCampo, d.supervisorDni);
+}
+
+function fallbackKeyFromRow_(row, headers) {
+  return fallbackKey_(
+    cell_(row, headers, 'Fecha'),
+    cell_(row, headers, 'Lote'),
+    cell_(row, headers, 'TurnoCampo') || 'Mañana',
+    cell_(row, headers, 'Supervisor DNI')
+  );
+}
+
+function buildRow_(headers, d, clientId) {
+  var map = {
+    'Fecha': toIsoFecha_(d.fecha) || d.fecha,
+    'Scanner': d.scanner,
+    'Scanner DNI': d.scannerDni,
+    'Supervisor': String(d.supervisor || '').trim(),
+    'Supervisor DNI': d.supervisorDni,
+    'Grupo': d.grupo,
+    'Etapa': d.etapa,
+    'Lote': d.lote,
+    'Fundo': d.fundo,
+    'Variedad': d.variedad,
+    'MD': d.md,
+    'Turno': d.turno,
+    'Area': d.area,
+    'Avance': d.avance,
+    'Jarras Conv': d.jarrasConv,
+    'Kg Conv': d.kgConv,
+    'Jarras China': d.jarrasChina,
+    'Kg China': d.kgChina,
+    'Total Jarras': d.totalJarras,
+    'Total Kg': d.totalKg,
+    'Jornales': d.jornales,
+    'ClientId': clientId || '',
+    'TurnoCampo': normTurno_(d.turnoCampo),
+    'Hora registro': horaCorta_(d.horaRegistro || d.horaEnvio),
+    'Hora envío': d.horaEnvio || ''
+  };
+  return headers.map(function (name) {
+    return map.hasOwnProperty(name) ? map[name] : '';
+  });
+}
+
+function indexLog_(data, headers) {
+  var byId = {};
+  var byKey = {};
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var id = String(cell_(data[i], headers, 'ClientId') || '').trim();
+    if (id) byId[id] = i;
+    var key = fallbackKeyFromRow_(data[i], headers);
+    if (key) byKey[key] = i;
+  }
+  return { byId: byId, byKey: byKey };
+}
+
+function writeRanges_(sh, updates, appends) {
+  if (updates.length) {
+    updates.sort(function (a, b) { return a.row - b.row; });
+    var i = 0;
+    while (i < updates.length) {
+      var start = i;
+      var block = [updates[i].values];
+      while (i + 1 < updates.length && updates[i + 1].row === updates[i].row + 1) {
+        i++;
+        block.push(updates[i].values);
+      }
+      sh.getRange(updates[start].row, 1, block.length, block[0].length).setValues(block);
+      i++;
+    }
+  }
+  if (appends.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, appends.length, appends[0].length).setValues(appends);
+  }
+}
+
+function upsertBatch_(sh, recs, headers) {
+  headers = headers || ensureHeaders_(sh);
+  var last = sh.getLastRow();
+  var data = last > 1 ? sh.getRange(2, 1, last - 1, headers.length).getValues() : [];
+  var originalLen = data.length;
+  var idx = indexLog_(data, headers);
+  var accepted = [];
+  var existing = [];
+  var fechas = {};
+  var changedAt = {};
+  var i;
+
+  for (i = 0; i < recs.length; i++) {
+    var item = recs[i] || {};
+    var d = item.data || {};
+    var id = String(item.clientId || d.clientId || '').trim();
+    var lote = String(d.lote || '').trim();
+    if (!id || !lote) continue;
+    d.fecha = toIsoFecha_(d.fecha) || String(d.fecha || '').trim();
+    d.lote = lote;
+    d.turnoCampo = normTurno_(d.turnoCampo);
+    d.supervisorDni = String(d.supervisorDni || '').trim();
+    var values = buildRow_(headers, d, id);
+    var hit = idx.byId.hasOwnProperty(id) ? idx.byId[id] : -1;
+    if (hit < 0) {
+      var key = fallbackKeyFromData_(d);
+      if (key && idx.byKey.hasOwnProperty(key)) hit = idx.byKey[key];
+    }
+    if (hit >= 0) {
+      data[hit] = values;
+      idx.byId[id] = hit;
+      var oldKey = fallbackKeyFromRow_(values, headers);
+      if (oldKey) idx.byKey[oldKey] = hit;
+      changedAt[hit] = true;
+      existing.push(id);
+    } else {
+      hit = data.length;
+      data.push(values);
+      idx.byId[id] = hit;
+      var newKey = fallbackKeyFromData_(d);
+      if (newKey) idx.byKey[newKey] = hit;
+      accepted.push(id);
+    }
+    if (d.fecha) fechas[d.fecha] = true;
+  }
+
+  var updates = [];
+  var appends = [];
+  for (i = 0; i < data.length; i++) {
+    if (i < originalLen) {
+      if (changedAt[i]) updates.push({ row: i + 2, values: data[i] });
+    } else {
+      appends.push(data[i]);
+    }
+  }
+  writeRanges_(sh, updates, appends);
+
+  return {
+    accepted: accepted,
+    existing: existing,
+    changed: accepted.length + updates.length > 0,
+    fechas: Object.keys(fechas),
+    values: data
+  };
+}
+
+function toIsoFecha_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, TZ, 'yyyy-MM-dd');
+  }
+  var s = String(v || '').trim();
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
+  if (m) {
+    var d = ('0' + m[1]).slice(-2);
+    var mo = ('0' + m[2]).slice(-2);
+    return m[3] + '-' + mo + '-' + d;
+  }
+  return '';
+}
+
+function isoWeek(iso) {
+  iso = toIsoFecha_(iso);
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return '';
+  var d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  var day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+function horaCorta_(v) {
+  var s = String(v || '').trim();
+  var m = /(\d{1,2}):(\d{2})/.exec(s);
+  if (!m) return '';
+  return ('0' + m[1]).slice(-2) + ':' + m[2];
+}
+
+function horaMin_(a, b) {
+  a = horaCorta_(a);
+  b = horaCorta_(b);
+  if (!a) return b;
+  if (!b) return a;
+  return a < b ? a : b;
+}
+
+function horaLabel_(g) {
+  if (g.horaManana && g.horaTarde) return g.horaManana + ' / ' + g.horaTarde;
+  return g.horaTarde || g.horaManana || '';
+}
+
+function fmtDate(iso) {
+  iso = toIsoFecha_(iso);
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : '';
+}
+
+function fundoLabel(fundo, etapa) {
+  var e = String(etapa || '').trim();
+  var f = String(fundo || 'LICAPA').trim();
+  if (/licapa/i.test(e)) return e;
+  if (e) return f + ' ' + e;
+  return f;
+}
+
+function mdLabel_(md) {
+  return String(md || '').replace(/^m/i, '').trim();
+}
+
+function turnoCampoOnly_(row, headers) {
+  var raw = String(cell_(row, headers, 'TurnoCampo') || '').trim();
+  return /tarde/i.test(raw) ? 'Tarde' : 'Mañana';
+}
+
+function turnoLote_(v) {
+  return String(v || '').replace(/^T/i, '').trim();
+}
+
+function tiposDeFila_(row, headers) {
+  var jConv = num(cell_(row, headers, 'Jarras Conv'));
+  var jChina = num(cell_(row, headers, 'Jarras China'));
+  var kgConv = num(cell_(row, headers, 'Kg Conv'));
+  var kgChina = num(cell_(row, headers, 'Kg China'));
+  var out = [];
+  if (jConv > 0 || kgConv > 0) out.push({ tipo: 'CONVENCIONAL', envase: jConv, kilos: kgConv });
+  if (jChina > 0 || kgChina > 0) out.push({ tipo: 'CHINA', envase: jChina, kilos: kgChina });
+  if (!out.length) {
+    var totJ = num(cell_(row, headers, 'Total Jarras'));
+    var totK = num(cell_(row, headers, 'Total Kg'));
+    if (totJ > 0 || totK > 0) out.push({ tipo: 'CONVENCIONAL', envase: totJ, kilos: totK });
+  }
+  return out;
+}
+
+function num(v) {
+  var n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
+function sheetNameDia_(iso) {
+  return fmtDate(iso).replace(/\//g, '-');
+}
+
+function daySheet_(ss, iso) {
+  var name = sheetNameDia_(iso);
+  if (!name) return null;
+  var sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  return sh;
+}
+
+function dropOldResumen_(ss) {
+  ss.getSheets().forEach(function (s) {
+    if (ss.getSheets().length <= 1) return;
+    var name = String(s.getName() || '').trim();
+    if (/^resumen$/i.test(name) || /^produccion$/i.test(name)) ss.deleteSheet(s);
+  });
+}
+
+function writeDaySheet_(sh, rows) {
   sh.clear();
-  sh.appendRow(HEADERS);
+  sh.getRange(1, 1, 1, RESUMEN_HEADERS.length).setValues([RESUMEN_HEADERS]);
+  var lastData = 1;
+  if (rows.length) {
+    sh.getRange(2, 1, rows.length, RESUMEN_HEADERS.length).setValues(rows);
+    lastData = 1 + rows.length;
+  }
+  var totRow = lastData + 1;
+  var empty = ['', '', '', '', '', '', '', 0, '', '', '', 0, 0, 0, '', '', ''];
+  if (rows.length) {
+    empty[7] = rows.reduce(function (a, r) { return a + num(r[7]); }, 0);
+    empty[11] = Math.round(rows.reduce(function (a, r) { return a + num(r[11]); }, 0) * 100) / 100;
+    empty[12] = rows.reduce(function (a, r) { return a + num(r[12]); }, 0);
+    empty[13] = rows.reduce(function (a, r) { return a + num(r[13]); }, 0);
+    empty[14] = empty[11] > 0 ? Math.round(empty[13] / empty[11]) : '';
+    empty[15] = empty[12] > 0 ? Math.round(empty[13] / empty[12]) : '';
+  }
+  sh.getRange(totRow, 1, 1, RESUMEN_HEADERS.length).setValues([empty]);
+  sh.getRange(totRow, 1).setValue('TOTAL');
+  styleResumen_(sh, lastData, totRow);
+}
+
+function supervisorKey_(dni, nombre, nameToDni) {
+  var id = String(dni || '').replace(/\D/g, '').slice(0, 8);
+  var nom = String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  if (id.length === 8) return id;
+  if (nom && nameToDni && nameToDni[nom]) return nameToDni[nom];
+  return nom;
+}
+
+function groupLogToDays_(headers, values) {
+  var groups = {};
+  var order = [];
+  var mananaAv = {};
+  (values || []).forEach(function (row) {
+    if (turnoCampoOnly_(row, headers) !== 'Mañana') return;
+    var f = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    var lote = String(cell_(row, headers, 'Lote') || '').trim();
+    if (f && lote) mananaAv[f + '|' + lote] = num(cell_(row, headers, 'Avance') || cell_(row, headers, 'Area'));
+  });
+  (values || []).forEach(function (row) {
+    var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    if (!fecha) return;
+    var md = mdLabel_(cell_(row, headers, 'MD'));
+    var turno = turnoLote_(cell_(row, headers, 'Turno'));
+    var variedad = String(cell_(row, headers, 'Variedad') || '').trim();
+    var turnoCampo = turnoCampoOnly_(row, headers);
+    var fundo = fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa'));
+    var area = num(cell_(row, headers, 'Avance') || cell_(row, headers, 'Area'));
+    if (turnoCampo === 'Tarde') {
+      var base = mananaAv[fecha + '|' + String(cell_(row, headers, 'Lote') || '').trim()] || 0;
+      if (area >= base) area = Math.round((area - base) * 1000) / 1000;
+    }
+    var jornales = num(cell_(row, headers, 'Jornales'));
+    var tipos = tiposDeFila_(row, headers);
+    tipos.forEach(function (t, idx) {
+      var key = [fecha, t.tipo, fundo, md, variedad, turno].join('|');
+      if (!groups[key]) {
+        groups[key] = {
+          iso: fecha,
+          semana: isoWeek(fecha),
+          fecha: fmtDate(fecha),
+          tipo: t.tipo,
+          fundo: fundo,
+          md: md,
+          variedad: variedad,
+          turno: turno,
+          responsable: RESPONSABLE_FIJO,
+          manana: false,
+          tarde: false,
+          horaManana: '',
+          horaTarde: '',
+          envase: 0,
+          area: 0,
+          kilos: 0,
+          jornales: 0
+        };
+        order.push(key);
+      }
+      var g = groups[key];
+      var hr = horaCorta_(cell_(row, headers, 'Hora registro') || cell_(row, headers, 'Hora envío'));
+      if (turnoCampo === 'Tarde') {
+        g.tarde = true;
+        g.horaTarde = horaMin_(g.horaTarde, hr);
+      } else {
+        g.manana = true;
+        g.horaManana = horaMin_(g.horaManana, hr);
+      }
+      g.envase += t.envase;
+      g.kilos += t.kilos;
+      if (idx === 0) {
+        g.area += area;
+        g.jornales = Math.max(num(g.jornales), jornales);
+      }
+    });
+  });
+  var byDay = {};
+  order.forEach(function (key) {
+    var g = groups[key];
+    if (!byDay[g.iso]) byDay[g.iso] = [];
+    var jornales = num(g.jornales);
+    var kgHa = g.area > 0 ? Math.round(g.kilos / g.area) : '';
+    var kgJn = jornales > 0 ? Math.round(g.kilos / jornales) : '';
+    byDay[g.iso].push([
+      g.semana, g.fecha, g.tipo, g.fundo, g.md, g.variedad, g.turno || '',
+      g.envase, '', g.responsable || RESPONSABLE_FIJO, '',
+      Math.round(g.area * 100) / 100, jornales,
+      Math.round(g.kilos), kgHa, kgJn, horaLabel_(g)
+    ]);
+  });
+  return byDay;
+}
+
+function writeByDay_(ss, byDay) {
+  Object.keys(byDay || {}).sort().forEach(function (iso) {
+    var sh = daySheet_(ss, iso);
+    if (sh) writeDaySheet_(sh, byDay[iso]);
+  });
+}
+
+function rebuildDays_(ss, headers, values, isoList) {
+  var want = {};
+  (isoList || []).forEach(function (iso) {
+    var f = toIsoFecha_(iso);
+    if (f) want[f] = true;
+  });
+  if (!Object.keys(want).length) return;
+  var filtered = [];
+  (values || []).forEach(function (row) {
+    var f = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    if (want[f]) filtered.push(row);
+  });
+  var byDay = groupLogToDays_(headers, filtered);
+  Object.keys(want).forEach(function (iso) {
+    var sh = daySheet_(ss, iso);
+    if (sh) writeDaySheet_(sh, byDay[iso] || []);
+  });
+}
+
+function ensureRespSheet_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(RESP);
+  if (!sh) sh = ss.insertSheet(RESP);
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, RESP_HEADERS.length).setValues([RESP_HEADERS]);
+  } else {
+    var lastCol = Math.max(sh.getLastColumn(), 1);
+    var have = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+    RESP_HEADERS.forEach(function (name) {
+      if (have.indexOf(name) === -1) {
+        sh.getRange(1, have.length + 1).setValue(name);
+        have.push(name);
+      }
+    });
+  }
+  return sh;
+}
+
+function groupResponsables_(headers, values) {
+  var groups = {};
+  var order = [];
+  (values || []).forEach(function (row) {
+    var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    if (!fecha) return;
+    var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
+    var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
+    if (!nombre && !dni) return;
+    var key = fecha + '|' + (dni || nombre.toUpperCase());
+    var turnoCampo = turnoCampoOnly_(row, headers);
+    var jarras = num(cell_(row, headers, 'Total Jarras'));
+    if (!(jarras > 0)) {
+      jarras = num(cell_(row, headers, 'Jarras Conv')) + num(cell_(row, headers, 'Jarras China'));
+    }
+    var kilos = num(cell_(row, headers, 'Total Kg'));
+    if (!(kilos > 0)) {
+      kilos = num(cell_(row, headers, 'Kg Conv')) + num(cell_(row, headers, 'Kg China'));
+    }
+    var hr = horaCorta_(cell_(row, headers, 'Hora registro') || cell_(row, headers, 'Hora envío'));
+    if (!groups[key]) {
+      groups[key] = {
+        iso: fecha,
+        fecha: fmtDate(fecha),
+        supervisor: nombre || dni,
+        dni: dni,
+        manana: false,
+        tarde: false,
+        jarras: 0,
+        kilos: 0,
+        horaManana: '',
+        horaTarde: ''
+      };
+      order.push(key);
+    }
+    var g = groups[key];
+    if (nombre) g.supervisor = nombre;
+    if (dni) g.dni = dni;
+    g.jarras += jarras;
+    g.kilos += kilos;
+    if (turnoCampo === 'Tarde') {
+      g.tarde = true;
+      if (hr) g.horaTarde = hr;
+    } else {
+      g.manana = true;
+      if (hr) g.horaManana = hr;
+    }
+  });
+  var rows = [];
+  order.forEach(function (key) {
+    var g = groups[key];
+    var turnoCampo = g.manana && g.tarde ? 'Mañana / Tarde' : g.tarde ? 'Tarde' : 'Mañana';
+    var hora = g.tarde && g.horaTarde ? g.horaTarde : g.horaManana || g.horaTarde || '';
+    rows.push([
+      g.fecha,
+      g.supervisor,
+      g.dni,
+      turnoCampo,
+      Math.round(g.jarras),
+      Math.round(g.kilos * 100) / 100,
+      hora
+    ]);
+  });
+  rows.sort(function (a, b) {
+    var c = String(a[0]).localeCompare(String(b[0]));
+    return c || String(a[1]).localeCompare(String(b[1]), 'es');
+  });
+  return rows;
+}
+
+function writeResponsablesSheet_(sh, rows) {
+  sh.clear();
+  sh.getRange(1, 1, 1, RESP_HEADERS.length).setValues([RESP_HEADERS]);
+  if (rows && rows.length) {
+    sh.getRange(2, 1, rows.length, RESP_HEADERS.length).setValues(rows);
+  }
+  var last = 1 + (rows ? rows.length : 0);
+  var cols = RESP_HEADERS.length;
+  var all = sh.getRange(1, 1, Math.max(last, 1), cols);
+  all.setFontFamily('Calibri')
+    .setFontSize(10)
+    .setFontColor('#000000')
+    .setBackground('#FFFFFF')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle')
+    .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
+  sh.setFrozenRows(1);
+  sh.getRange(1, 1, 1, cols)
+    .setBackground('#F3F3F3')
+    .setFontWeight('bold');
+  if (rows && rows.length) {
+    sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0');
+    sh.getRange(2, 6, rows.length, 1).setNumberFormat('0.00');
+  }
+  var widths = [92, 220, 100, 110, 70, 70, 86];
+  widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  sh.setTabColor('#F7941D');
+  try {
+    var f = sh.getFilter();
+    if (f) f.remove();
+  } catch (e1) {}
+  if (rows && rows.length) sh.getRange(1, 1, last, cols).createFilter();
+}
+
+function rebuildResponsables_(ss, headers, values, isoList) {
+  ss = ss || SpreadsheetApp.getActive();
+  var sh = ensureRespSheet_(ss);
+  var want = null;
+  if (isoList && isoList.length) {
+    want = {};
+    isoList.forEach(function (iso) {
+      var f = toIsoFecha_(iso);
+      if (f) want[f] = true;
+    });
+  }
+  var existing = [];
+  if (want && sh.getLastRow() > 1) {
+    var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+    var old = sh.getRange(2, 1, sh.getLastRow() - 1, have.length).getValues();
+    var fechaIdx = have.indexOf('Fecha');
+    old.forEach(function (row) {
+      var f = toIsoFecha_(row[fechaIdx >= 0 ? fechaIdx : 0]);
+      if (!f || want[f]) return;
+      existing.push(row.slice(0, RESP_HEADERS.length));
+    });
+  }
+  var filtered = values || [];
+  if (want) {
+    filtered = [];
+    (values || []).forEach(function (row) {
+      var f = toIsoFecha_(cell_(row, headers, 'Fecha'));
+      if (want[f]) filtered.push(row);
+    });
+  }
+  var rebuilt = groupResponsables_(headers, filtered);
+  var allRows = existing.concat(rebuilt);
+  allRows.sort(function (a, b) {
+    var c = String(a[0]).localeCompare(String(b[0]));
+    return c || String(a[1]).localeCompare(String(b[1]), 'es');
+  });
+  writeResponsablesSheet_(sh, allRows);
+}
+
+function rebuildResumen() {
+  var ss = SpreadsheetApp.getActive();
+  var prod = logSheet_(ss);
+  dropOldResumen_(ss);
+  var byDay = {};
+  var headers = null;
+  var values = [];
+  if (prod && prod.getLastRow() > 1) {
+    headers = ensureHeaders_(prod);
+    values = prod.getRange(2, 1, prod.getLastRow() - 1, headers.length).getValues();
+    byDay = groupLogToDays_(headers, values);
+  }
+  writeByDay_(ss, byDay);
+  if (headers) rebuildResponsables_(ss, headers, values, null);
+  else ensureRespSheet_(ss);
+}
+
+function styleResumen_(sh, lastData, totRow) {
+  var cols = RESUMEN_HEADERS.length;
+  sh.setTabColor('#1B5E20');
+  var all = sh.getRange(1, 1, totRow, cols);
+  all.setFontFamily('Calibri')
+    .setFontSize(10)
+    .setFontColor('#000000')
+    .setBackground('#FFFFFF')
+    .setFontWeight('normal')
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle')
+    .setNumberFormat('@')
+    .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
+  sh.setFrozenRows(1);
+  sh.getRange(1, 1, 1, cols)
+    .setBackground('#F3F3F3')
+    .setFontColor('#000000')
+    .setFontWeight('bold')
+    .setWrap(true);
+  if (lastData > 1) {
+    sh.getRange(2, 1, lastData - 1, 1).setNumberFormat('0');
+    sh.getRange(2, 2, lastData - 1, 1).setNumberFormat('@');
+    sh.getRange(2, 7, lastData - 1, 1).setNumberFormat('@');
+    sh.getRange(2, 8, lastData - 1, 1).setNumberFormat('#,##0');
+    sh.getRange(2, 10, lastData - 1, 1).setNumberFormat('@').setWrap(true);
+    sh.getRange(2, 12, lastData - 1, 1).setNumberFormat('0.00');
+    sh.getRange(2, 13, lastData - 1, 2).setNumberFormat('#,##0');
+    sh.getRange(2, 15, lastData - 1, 2).setNumberFormat('#,##0');
+    sh.getRange(2, 17, lastData - 1, 1).setNumberFormat('@');
+  }
+  sh.getRange(totRow, 1, 1, cols)
+    .setBackground('#F3F3F3')
+    .setFontColor('#000000')
+    .setFontWeight('bold');
+  sh.getRange(totRow, 8).setNumberFormat('#,##0');
+  sh.getRange(totRow, 12).setNumberFormat('0.00');
+  sh.getRange(totRow, 13, 1, 2).setNumberFormat('#,##0');
+  sh.getRange(totRow, 15, 1, 2).setNumberFormat('#,##0');
+  var widths = [70, 92, 110, 78, 70, 96, 70, 72, 70, 168, 86, 70, 90, 70, 68, 92, 86];
+  widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  sh.setRowHeight(1, 32);
+  try {
+    var f = sh.getFilter();
+    if (f) f.remove();
+  } catch (e1) {}
+  if (lastData > 1) sh.getRange(1, 1, lastData, cols).createFilter();
 }

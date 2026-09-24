@@ -1,1 +1,8 @@
-/*    /index.html   200
+/data/*   /data/:splat   200
+/js/*     /js/:splat     200
+/css/*    /css/:splat    200
+/fonts/*  /fonts/:splat  200
+/assets/* /assets/:splat 200
+/sw.js    /sw.js         200
+/manifest.json /manifest.json 200
+/*        /index.html    200

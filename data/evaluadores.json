@@ -1,0 +1,230 @@
+{
+  "tipo": "evaluadores",
+  "uso": "Lista fija del campo Evaluador en las 4 evaluaciones.",
+  "count": 74,
+  "updatedAt": "2026-09-09",
+  "byDni": {
+    "18078464": {
+      "nombre": "LOYOLA DOMINGUEZ OSWALDO ELMER"
+    },
+    "40354659": {
+      "nombre": "REYES JAVE LOURDES LIZETH"
+    },
+    "44262821": {
+      "nombre": "CHAVEZ CABRERA MARIBEL VICENTA"
+    },
+    "45123552": {
+      "nombre": "LINARES CERNA OSCAR PAUL"
+    },
+    "45305359": {
+      "nombre": "URTEAGA SHIMIZU YEHAN EVELYN"
+    },
+    "45608103": {
+      "nombre": "GAVIDIA RAMIREZ LUIGI ANDERSON"
+    },
+    "46819781": {
+      "nombre": "PEREZ LEON SALLY ELIZABETH"
+    },
+    "47188311": {
+      "nombre": "PEREIRA VASQUEZ LUCELIA LEONORA"
+    },
+    "47407697": {
+      "nombre": "ROLDAN PEREZ JULIO ANTONIO"
+    },
+    "48489693": {
+      "nombre": "HUACCHA TERRONES ESTHEFANI LIZBETH"
+    },
+    "48962428": {
+      "nombre": "CALVANAPON LOPEZ CARLOS MAGNO"
+    },
+    "60036529": {
+      "nombre": "CHUAN MIRANDA DANIELA MILAGRITOS"
+    },
+    "60208178": {
+      "nombre": "GUARNIZ BRIONES EVELYN MARDELI"
+    },
+    "60293807": {
+      "nombre": "QUIROZ MEDINA QUELUBIA"
+    },
+    "60412486": {
+      "nombre": "LEON CARRANZA YHULEISY ALEXANDRA"
+    },
+    "60412552": {
+      "nombre": "TAMARIZ LOPEZ VICTOR JANPIER"
+    },
+    "60412805": {
+      "nombre": "DIAZ SOTO SANDRA GRABIELA"
+    },
+    "60461272": {
+      "nombre": "NOE LEZAMA DANNER JANO"
+    },
+    "60461291": {
+      "nombre": "PAISIG ALFARO WILMER MANUEL"
+    },
+    "60461308": {
+      "nombre": "ALCANTARA VIGO DANIEL ELIAS"
+    },
+    "60532091": {
+      "nombre": "CARRANZA MAMANI LUIS ANDERSON"
+    },
+    "60554649": {
+      "nombre": "CARRANZA DIAZ ARIANA JESUSANITA"
+    },
+    "60600072": {
+      "nombre": "VIGO PAREDES GABRIELA ANAIS"
+    },
+    "60633034": {
+      "nombre": "SANGAY CABANILLAS RICARDO FRANCO"
+    },
+    "60740851": {
+      "nombre": "HORNA JUAREZ ROSALINA NOEMI"
+    },
+    "61256413": {
+      "nombre": "SALDAÑA POEMAPE JULEISY ALEXANDRA"
+    },
+    "61256446": {
+      "nombre": "RUMAY DIAZ KEVIN ELISEO"
+    },
+    "61256447": {
+      "nombre": "RUMAY DIAZ LAZARO RENE"
+    },
+    "61669930": {
+      "nombre": "SEGURA NEYRA YENNY LISET"
+    },
+    "62162097": {
+      "nombre": "LLANOS SANCHEZ DAYANA NICOLE"
+    },
+    "62585049": {
+      "nombre": "RODRIGUEZ DAGA ERICKA ELIZABETH"
+    },
+    "62749305": {
+      "nombre": "ARANDA SOLIS VALERIA YAMILET"
+    },
+    "62894779": {
+      "nombre": "VILLALOBOS CARRANZA YURICO NATALY"
+    },
+    "70132627": {
+      "nombre": "MIRANDA PALACIOS ERNESTINA EVELYN"
+    },
+    "70134863": {
+      "nombre": "RIMACHE RAVINES GERSON ELIEZER"
+    },
+    "70142292": {
+      "nombre": "YRRIBARREN MERCEDES PEDRO JESUS"
+    },
+    "70550707": {
+      "nombre": "REYES SANGAY JUAN SAMUEL"
+    },
+    "70650830": {
+      "nombre": "LIMA PALOMINO MAURICIO RENATO"
+    },
+    "70658198": {
+      "nombre": "FLORES MARIÑOS ELIZA GIANELLA"
+    },
+    "70667311": {
+      "nombre": "ALCANTARA VIGO BELCY GABRIELITA"
+    },
+    "70735997": {
+      "nombre": "DIAZ SOTO MARIA FERNANDA"
+    },
+    "70901533": {
+      "nombre": "GALLARDO CHUQUIPOMA KENIA STEPHANY"
+    },
+    "71099835": {
+      "nombre": "MERINO ISLA JEFFERSON ALEXIS"
+    },
+    "71149417": {
+      "nombre": "CABRERA PEREZ CARLOS SAÚL"
+    },
+    "71327899": {
+      "nombre": "MURGA CASTILLO KEVIN WILLIAMS"
+    },
+    "71327907": {
+      "nombre": "HUACCHA TERRONES FRANCO EMANUEL"
+    },
+    "71367059": {
+      "nombre": "MELON VILLANUEVA KARINA ELIZABETH"
+    },
+    "71509838": {
+      "nombre": "CANO OLIVARES FATIMA DANIELA"
+    },
+    "71729579": {
+      "nombre": "VISITACION PEÑA ANDERSON DANY"
+    },
+    "72096348": {
+      "nombre": "DIOSES MENDOZA FLOR MARIA"
+    },
+    "72743323": {
+      "nombre": "VILLANUEVA CAYPO ELIZABETH NOEMI"
+    },
+    "72795195": {
+      "nombre": "QUISPE ZERPA MARIA ELENA"
+    },
+    "72799496": {
+      "nombre": "VASQUEZ CARDENAS CRISTIAN OLIVER"
+    },
+    "72967660": {
+      "nombre": "LLANOS SANCHEZ NAYELI DE LOS ANGELES"
+    },
+    "74292255": {
+      "nombre": "ESTACIO HUAMAN CLAUDIA LUCIA"
+    },
+    "74571779": {
+      "nombre": "BRICEÑO SEVILLANO ALBERTO MAURO"
+    },
+    "74662085": {
+      "nombre": "OLGUIN OVALLE BRAYAN GIOVANI"
+    },
+    "74969230": {
+      "nombre": "MONTALVO PEREZ SAIDY PATRICIA"
+    },
+    "75023790": {
+      "nombre": "BUENO VELEZMORO DEYSI ELIZABETH"
+    },
+    "75023887": {
+      "nombre": "SIPIRAN BAUTISTA OSCAR RUBEN"
+    },
+    "75078526": {
+      "nombre": "LOZADA PAJARES JOSE JULIAN"
+    },
+    "75138175": {
+      "nombre": "RUGEL AVILA CYNTHIA ELIZABETH"
+    },
+    "75278098": {
+      "nombre": "MACHUCA ALVAREZ LUIGUI JANPIER"
+    },
+    "75501379": {
+      "nombre": "SALVADOR FLOREANO LUZ DEL ROCIO"
+    },
+    "75901806": {
+      "nombre": "PLASENCIA GASTOPE ESMERALDA ALEXANDRA"
+    },
+    "76173220": {
+      "nombre": "GUTIERREZ VALQUI ETHEL YAMELI"
+    },
+    "76313065": {
+      "nombre": "RODRIGUEZ AGUILAR ARIANA MILAGROS"
+    },
+    "76371313": {
+      "nombre": "CORTEZ PAJARES PERLA MABEL"
+    },
+    "76418254": {
+      "nombre": "BALERIO CARRANZA ERICK IVAN"
+    },
+    "76977945": {
+      "nombre": "CASTRO SANCHEZ MARIA VALENTINA"
+    },
+    "77418497": {
+      "nombre": "DIAZ SOTO ROXANA"
+    },
+    "77505282": {
+      "nombre": "LANDAURO GUTIERREZ SARALEE SOFIA"
+    },
+    "77679860": {
+      "nombre": "COTRINA ABANTO ESMELA LIZBETH"
+    },
+    "77799828": {
+      "nombre": "ZAVALETA IGLESIAS KAHORY MARIANELA"
+    }
+  }
+}
