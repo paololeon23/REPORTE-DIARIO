@@ -452,7 +452,11 @@ APP.API = (() => {
       {
         method: "POST",
         cache: "no-store",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+        },
         body,
       },
       rebuild ? 55000 : SEND_TIMEOUT
@@ -498,8 +502,8 @@ APP.API = (() => {
       if (onProgress) onProgress({ sent, left: leftNow, total: sent + leftNow, reports: pendingCount() });
       try {
         const last = queue.length <= batch.length;
-        // rebuild lo hace el servidor en cola; aquí pedimos ok rápido.
-        const okIds = await sendBatch(batch, false, {
+        // Pedimos ok del servidor; merge de hojas corre en el mismo POST (sin CacheService).
+        const okIds = await sendBatch(batch, true, {
           summary,
           turnoCampo,
           report: { summary, turnoCampo, lotes: queue.length, final: last },

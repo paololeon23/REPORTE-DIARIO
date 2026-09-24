@@ -25,8 +25,6 @@ var ACUM_HEADERS = [
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
   'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
-var MERGE_CACHE_KEY = 'qb_merge_deltas_v1';
-var MERGE_TRIGGER_FN = 'runQueuedMerge_';
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -34,6 +32,7 @@ function jsonOut_(obj) {
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.ping) return jsonOut_({ ok: true, pong: true });
+  if (e && e.parameter && e.parameter.test === '1') return jsonOut_(runSaveSelfTest_());
   return jsonOut_({ ok: true });
 }
 
@@ -47,17 +46,29 @@ function doPost(e) {
     var sh = logSheet_(ss);
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
+
+    // 1) SIEMPRE guardar el POST primero (sin cache).
     var result = upsertBatch_(sh, recs, headers);
-    // Responder ok YA (el Excel/_lotes ya guardó). El merge de hojas va en cola
-    // para que el celular no se quede en "pendiente" por un merge lento.
-    if (result.changed && result.deltas && result.deltas.length && body.rebuild !== false) {
-      queueMergeDeltas_(result.deltas);
+    SpreadsheetApp.flush();
+
+    // 2) Actualizar hojas visibles (si falla, el guardado YA quedó en _lotes).
+    if (result.changed && result.deltas && result.deltas.length) {
+      try {
+        dropReporteSheets_(ss);
+        mergeDaysFromDeltas_(ss, headers, result.deltas, sh);
+        mergeResponsablesFromDeltas_(ss, headers, result.deltas);
+        mergeAcumuladoFromDeltas_(ss, headers, result.deltas);
+        SpreadsheetApp.flush();
+      } catch (rebuildErr) {}
     }
+
+    // 3) ok:true solo si el upsert corrió (los lotes están en _lotes).
     return jsonOut_({
       ok: true,
       accepted: result.accepted || [],
       existing: result.existing || [],
-      saved: (result.accepted || []).length + (result.existing || []).length
+      saved: (result.accepted || []).length + (result.existing || []).length,
+      flushed: true
     });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
@@ -66,80 +77,121 @@ function doPost(e) {
   }
 }
 
-function queueMergeDeltas_(deltas) {
-  try {
-    var payload = JSON.stringify(deltas || []);
-    if (payload.length > 90000) {
-      // Demasiado grande para cache: merge síncrono (raro).
-      var ss = SpreadsheetApp.getActive();
-      var sh = logSheet_(ss);
-      var headers = ensureHeaders_(sh);
-      mergeDaysFromDeltas_(ss, headers, deltas, sh);
-      mergeResponsablesFromDeltas_(ss, headers, deltas);
-      mergeAcumuladoFromDeltas_(ss, headers, deltas);
-      dropReporteSheets_(ss);
-      return;
-    }
-    var cache = CacheService.getScriptCache();
-    var prev = cache.get(MERGE_CACHE_KEY);
-    if (prev) {
-      try {
-        var prevArr = JSON.parse(prev);
-        if (Object.prototype.toString.call(prevArr) === '[object Array]') {
-          deltas = prevArr.concat(deltas || []);
-          payload = JSON.stringify(deltas);
-        }
-      } catch (e0) {}
-    }
-    cache.put(MERGE_CACHE_KEY, payload, 600);
-    ensureMergeTrigger_();
-  } catch (e1) {
-    try {
-      var ss2 = SpreadsheetApp.getActive();
-      var sh2 = logSheet_(ss2);
-      var headers2 = ensureHeaders_(sh2);
-      mergeDaysFromDeltas_(ss2, headers2, deltas, sh2);
-      mergeResponsablesFromDeltas_(ss2, headers2, deltas);
-      mergeAcumuladoFromDeltas_(ss2, headers2, deltas);
-    } catch (e2) {}
+/**
+ * Autotest de guardado (sin cache). Ejecutar desde el editor: runSaveSelfTest_
+ * o GET ?test=1
+ */
+function runSaveSelfTest_() {
+  var out = { ok: true, checks: [] };
+  function push(id, pass, extra) {
+    out.checks.push({ id: id, ok: !!pass, extra: extra || '' });
+    if (!pass) out.ok = false;
   }
-}
-
-function ensureMergeTrigger_() {
-  var triggers = ScriptApp.getProjectTriggers();
-  var i;
-  for (i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === MERGE_TRIGGER_FN) return;
-  }
-  ScriptApp.newTrigger(MERGE_TRIGGER_FN).timeBased().after(1000).create();
-}
-
-function runQueuedMerge_() {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(20000)) return;
   try {
-    var cache = CacheService.getScriptCache();
-    var raw = cache.get(MERGE_CACHE_KEY);
-    if (!raw) return;
-    cache.remove(MERGE_CACHE_KEY);
-    var deltas = JSON.parse(raw);
-    if (!deltas || !deltas.length) return;
     var ss = SpreadsheetApp.getActive();
     var sh = logSheet_(ss);
     var headers = ensureHeaders_(sh);
-    try { dropReporteSheets_(ss); } catch (e0) {}
-    try { mergeDaysFromDeltas_(ss, headers, deltas, sh); } catch (e1) {}
-    try { mergeResponsablesFromDeltas_(ss, headers, deltas); } catch (e2) {}
-    try { mergeAcumuladoFromDeltas_(ss, headers, deltas); } catch (e3) {}
-  } catch (err) {
-  } finally {
-    try { lock.releaseLock(); } catch (e4) {}
+    var stamp = Utilities.formatDate(new Date(), TZ, 'HHmmss');
+    var lote = 'TEST-' + stamp;
+    var dni = '99999999';
+    var fecha = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+    var recs = [{
+      clientId: 'test-' + stamp,
+      data: {
+        fecha: fecha,
+        lote: lote,
+        supervisor: 'TEST AUTO',
+        supervisorDni: dni,
+        turnoCampo: 'Mañana',
+        turno: '1',
+        md: '1',
+        variedad: 'TEST',
+        fundo: 'LICAPA',
+        jarrasConv: 7,
+        kgConv: 7.98,
+        totalJarras: 7,
+        totalKg: 7.98,
+        avance: 0.1,
+        jornales: 1,
+        horaRegistro: '12:00'
+      }
+    }];
+    var r1 = upsertBatch_(sh, recs, headers);
+    SpreadsheetApp.flush();
+    push('A-upsert-accept', r1.changed && r1.accepted.length === 1, String(r1.accepted));
+
+    var key = fallbackKey_(fecha, lote, 'Mañana', dni);
+    var found = false;
+    var last = sh.getLastRow();
+    if (last > 1) {
+      var data = sh.getRange(2, 1, last - 1, headers.length).getValues();
+      var i;
+      for (i = 0; i < data.length; i++) {
+        if (fallbackKeyFromRow_(data[i], headers) === key) {
+          found = true;
+          push('B-no-clientId', String(cell_(data[i], headers, 'ClientId') || '') === '', '');
+          push('C-jarras', num(cell_(data[i], headers, 'Total Jarras')) === 7, '');
+          break;
+        }
+      }
+    }
+    push('D-row-in-sheet', found, key);
+
+    // Reenvío (update) misma clave
+    recs[0].data.totalJarras = 9;
+    recs[0].data.jarrasConv = 9;
+    recs[0].data.kgConv = 10.26;
+    recs[0].data.totalKg = 10.26;
+    var r2 = upsertBatch_(sh, recs, headers);
+    SpreadsheetApp.flush();
+    push('E-update-existing', r2.existing.length === 1 && r2.accepted.length === 0, '');
+
+    var jarras = 0;
+    last = sh.getLastRow();
+    if (last > 1) {
+      var data2 = sh.getRange(2, 1, last - 1, headers.length).getValues();
+      var count = 0;
+      var j;
+      for (j = 0; j < data2.length; j++) {
+        if (fallbackKeyFromRow_(data2[j], headers) === key) {
+          count++;
+          jarras = num(cell_(data2[j], headers, 'Total Jarras'));
+        }
+      }
+      push('F-no-duplicate-row', count === 1, 'count=' + count);
+      push('G-updated-value', jarras === 9, 'jarras=' + jarras);
+    }
+
+    // Merge visible
     try {
-      ScriptApp.getProjectTriggers().forEach(function (t) {
-        if (t.getHandlerFunction() === MERGE_TRIGGER_FN) ScriptApp.deleteTrigger(t);
-      });
-    } catch (e5) {}
+      mergeDaysFromDeltas_(ss, headers, r2.deltas, sh);
+      mergeResponsablesFromDeltas_(ss, headers, r2.deltas);
+      mergeAcumuladoFromDeltas_(ss, headers, r2.deltas);
+      SpreadsheetApp.flush();
+      push('H-merge-ok', true, '');
+    } catch (me) {
+      push('H-merge-ok', false, String(me));
+    }
+
+    // Limpieza del lote de prueba
+    last = sh.getLastRow();
+    if (last > 1) {
+      var keep = [];
+      var all = sh.getRange(2, 1, last - 1, headers.length).getValues();
+      var k;
+      for (k = 0; k < all.length; k++) {
+        if (fallbackKeyFromRow_(all[k], headers) !== key) keep.push(all[k]);
+      }
+      sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), headers.length).clearContent();
+      if (keep.length) sh.getRange(2, 1, keep.length, headers.length).setValues(keep);
+      SpreadsheetApp.flush();
+    }
+    push('I-cleanup', true, '');
+  } catch (err) {
+    out.ok = false;
+    out.error = String(err);
   }
+  return out;
 }
 
 function normalizeRecs_(body) {
@@ -155,7 +207,20 @@ function onOpen() {
     .createMenu('Q Berries')
     .addItem('Actualizar resumen', 'rebuildResumen')
     .addItem('Preparar hojas', 'setupSheets')
+    .addItem('Probar guardado POST', 'runSaveSelfTestMenu_')
     .addToUi();
+}
+
+function runSaveSelfTestMenu_() {
+  var r = runSaveSelfTest_();
+  var lines = (r.checks || []).map(function (c) {
+    return (c.ok ? 'OK' : 'FAIL') + ' · ' + c.id + (c.extra ? ' · ' + c.extra : '');
+  });
+  SpreadsheetApp.getUi().alert(
+    r.ok ? 'Test OK — cada POST se guarda' : 'Test con fallos',
+    lines.join('\n') + (r.error ? '\n\n' + r.error : ''),
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
 }
 
 function logSheet_(ss) {
@@ -323,6 +388,7 @@ function writeRanges_(sh, updates, appends) {
   if (appends.length) {
     sh.getRange(sh.getLastRow() + 1, 1, appends.length, appends[0].length).setValues(appends);
   }
+  SpreadsheetApp.flush();
 }
 
 /** Upsert por fecha+lote+turnoCampo+supervisor (sin ClientId). */
