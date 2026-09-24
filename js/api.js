@@ -10,7 +10,7 @@ APP.API = (() => {
   const SENDS_KEY = "app_cosecha_sends";
   const OUTBOX_KEY = "app_cosecha_outbox";
   const DAY_MS = 24 * 60 * 60 * 1000;
-  const SEND_TIMEOUT = 40000;
+  const SEND_TIMEOUT = 25000;
   const PING_TIMEOUT = 10000;
   const BATCH = 25;
   const MAX_FLUSH_FAILURES = 3;
@@ -467,7 +467,7 @@ APP.API = (() => {
       json = JSON.parse(text);
     } catch (_) {}
     if (!json || json.ok !== true) throw new Error("bad-response");
-    // ok:true del servidor = lote guardado → confirmar siempre (aunque no liste IDs).
+    // ok:true = guardado. Confirmar TODO el lote del batch (un envío).
     const okIds = new Set([].concat(json.accepted || [], json.existing || []));
     batch.forEach((r) => {
       if (r && r.clientId) okIds.add(r.clientId);

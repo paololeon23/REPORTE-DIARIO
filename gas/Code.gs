@@ -25,6 +25,8 @@ var ACUM_HEADERS = [
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
   'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
+var MERGE_PROP_KEY = 'qb_merge_queue';
+var MERGE_TRIGGER_FN = 'runQueuedMerge_';
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -47,33 +49,97 @@ function doPost(e) {
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
 
-    // 1) SIEMPRE guardar el POST primero (sin cache).
+    // 1) Guardar SIEMPRE el POST (esto es lo que importa).
     var result = upsertBatch_(sh, recs, headers);
     SpreadsheetApp.flush();
 
-    // 2) Actualizar hojas visibles (si falla, el guardado YA quedó en _lotes).
-    if (result.changed && result.deltas && result.deltas.length) {
-      try {
-        dropReporteSheets_(ss);
-        mergeDaysFromDeltas_(ss, headers, result.deltas, sh);
-        mergeResponsablesFromDeltas_(ss, headers, result.deltas);
-        mergeAcumuladoFromDeltas_(ss, headers, result.deltas);
-        SpreadsheetApp.flush();
-      } catch (rebuildErr) {}
-    }
-
-    // 3) ok:true solo si el upsert corrió (los lotes están en _lotes).
-    return jsonOut_({
+    // 2) Responder ok YA → el celular confirma y no se congela.
+    var response = {
       ok: true,
       accepted: result.accepted || [],
       existing: result.existing || [],
       saved: (result.accepted || []).length + (result.existing || []).length,
       flushed: true
-    });
+    };
+
+    // 3) Armar hojas visibles DESPUÉS (cola durable, no CacheService).
+    if (result.changed && result.deltas && result.deltas.length) {
+      queueMergeDeltas_(result.deltas);
+    }
+
+    return jsonOut_(response);
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
     try { lock.releaseLock(); } catch (e2) {}
+  }
+}
+
+/** Cola durable en PropertiesService (no es cache): el POST ya quedó en _lotes. */
+function queueMergeDeltas_(deltas) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var arr = [];
+    var prev = props.getProperty(MERGE_PROP_KEY);
+    if (prev) {
+      try {
+        var p = JSON.parse(prev);
+        if (Object.prototype.toString.call(p) === '[object Array]') arr = p;
+      } catch (e0) {}
+    }
+    arr = arr.concat(deltas || []);
+    var payload = JSON.stringify(arr);
+    if (payload.length > 8500) {
+      applyMergeDeltas_(arr);
+      props.deleteProperty(MERGE_PROP_KEY);
+      return;
+    }
+    props.setProperty(MERGE_PROP_KEY, payload);
+    ensureMergeTrigger_();
+  } catch (e1) {
+    try { applyMergeDeltas_(deltas); } catch (e2) {}
+  }
+}
+
+function ensureMergeTrigger_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var i;
+  for (i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === MERGE_TRIGGER_FN) return;
+  }
+  ScriptApp.newTrigger(MERGE_TRIGGER_FN).timeBased().after(800).create();
+}
+
+function applyMergeDeltas_(deltas) {
+  if (!deltas || !deltas.length) return;
+  var ss = SpreadsheetApp.getActive();
+  var sh = logSheet_(ss);
+  var headers = ensureHeaders_(sh);
+  try { dropReporteSheets_(ss); } catch (e0) {}
+  try { mergeDaysFromDeltas_(ss, headers, deltas, sh); } catch (e1) {}
+  try { mergeResponsablesFromDeltas_(ss, headers, deltas); } catch (e2) {}
+  try { mergeAcumuladoFromDeltas_(ss, headers, deltas); } catch (e3) {}
+  SpreadsheetApp.flush();
+}
+
+function runQueuedMerge_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return;
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var raw = props.getProperty(MERGE_PROP_KEY);
+    if (!raw) return;
+    props.deleteProperty(MERGE_PROP_KEY);
+    var deltas = JSON.parse(raw);
+    applyMergeDeltas_(deltas);
+  } catch (err) {
+  } finally {
+    try { lock.releaseLock(); } catch (e4) {}
+    try {
+      ScriptApp.getProjectTriggers().forEach(function (t) {
+        if (t.getHandlerFunction() === MERGE_TRIGGER_FN) ScriptApp.deleteTrigger(t);
+      });
+    } catch (e5) {}
   }
 }
 

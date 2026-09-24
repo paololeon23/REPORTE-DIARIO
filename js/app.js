@@ -792,13 +792,11 @@ APP.App = (() => {
     const pendingBtn = $("#chip-pending");
     if (pendingBtn) {
       pendingBtn.onclick = () => {
-        const reports = APP.API.pendingCount();
-        const lots = APP.API.lotPendingCount();
-        const n = reports > 0 ? lots : 0;
+        const n = APP.API.pendingCount();
         feedback(
-          n ? (n === 1 ? "1 lote por confirmar" : `${n} lotes por confirmar`) : "Nada por enviar",
+          n ? (n === 1 ? "1 envío por confirmar" : `${n} envíos por confirmar`) : "Nada por enviar",
           n
-            ? "El conteo baja solo cuando el servidor responde ok. Con señal, espera o pulsa Enviar otra vez."
+            ? "Un Enviar = 1 pendiente. Baja a 0 cuando el servidor responde ok."
             : "Los lotes Guardados están en el celular. El pendiente aparece al pulsar Enviar."
         );
       };
@@ -1230,20 +1228,14 @@ APP.App = (() => {
       }
 
       // Con red: enviar directo (sin ping previo que bloqueaba / duplicaba espera).
-      showLoader("Enviando", isSecond ? "Enviando el reporte de tarde…" : "Enviando el reporte de mañana…");
+      showLoader("Enviando", "Enviando reporte…");
       const result = await APP.API.flush({
         summary: totalTxt,
         turnoCampo: turnoEnvio,
         supervisorDni: dni,
-        onProgress: (p) => {
-          const left = Number(p && p.left) || 0;
-          const done = Number(p && p.sent) || 0;
-          showLoader(
-            "Enviando",
-            left > 0 ? `Enviados ${done} · quedan ${left}` : `Enviados ${done} · confirmando…`
-          );
+        onProgress: () => {
+          showLoader("Enviando", "Enviando reporte…");
           paintStatus();
-          paintDay();
         },
       });
       paintDay();
@@ -1313,11 +1305,14 @@ APP.App = (() => {
       await feedback("Mañana enviada", `Listo: ${totalTxt}. El turno pasó a Tarde.`, auto ? { ms: 2200 } : undefined);
     } catch (e) {
       hideLoader();
+      paintStatus();
       if (!auto) {
         await feedback("No se pudo enviar", "Tus lotes siguen en el celular. Si quedó 1 pendiente, reintenta con señal.");
       }
     } finally {
+      hideLoader();
       state.transferring = false;
+      paintStatus();
     }
   }
 
@@ -1403,13 +1398,10 @@ APP.App = (() => {
       const text = el.querySelector(".chip-text");
       if (text) text.textContent = on ? "En línea" : "Sin red";
     });
-    // Con reporte en cola: mostrar lotes que faltan (baja en vivo al confirmar ok:true).
-    // Sin reporte: 0 (los guardados locales no cuentan como pend. hasta Enviar).
-    const reports = APP.API.pendingCount();
-    const lots = APP.API.lotPendingCount();
-    const n = reports > 0 ? lots : 0;
+    // 1 envío = 1 pendiente (no el número de lotes).
+    const n = APP.API.pendingCount();
     document.querySelectorAll("#chip-pending-text, [data-chip-pending-text]").forEach((el) => {
-      el.textContent = `${n} pend.`;
+      el.textContent = n > 0 ? (n === 1 ? "1 pend." : n + " pend.") : "0 pend.";
     });
     document.querySelectorAll("#chip-pending, [data-chip-pending]").forEach((el) => {
       el.classList.toggle("has-items", n > 0);
