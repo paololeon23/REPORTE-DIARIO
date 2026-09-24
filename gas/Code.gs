@@ -38,12 +38,12 @@ function doPost(e) {
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
     var result = upsertBatch_(sh, recs, headers);
-    // El guardado ya quedó. El resumen NO debe tumbar el POST (si falla, el celular quedaba en pendiente).
-    if (body.rebuild !== false && result.changed && result.fechas.length) {
+    // Suma solo este envío sobre lo que YA está en la hoja del día / Responsables.
+    // No reconstruye desde _lotes (si borras la hoja, no vuelve el historial).
+    if (body.rebuild !== false && result.changed && result.deltas && result.deltas.length) {
       try {
-        var dayValues = readLogForFechas_(sh, headers, result.fechas);
-        rebuildDays_(ss, headers, dayValues, result.fechas);
-        rebuildResponsables_(ss, headers, dayValues, result.fechas);
+        mergeDaysFromDeltas_(ss, headers, result.deltas, sh);
+        mergeResponsablesFromDeltas_(ss, headers, result.deltas);
       } catch (rebuildErr) {}
     }
     return jsonOut_({
@@ -259,6 +259,7 @@ function upsertBatch_(sh, recs, headers) {
   var accepted = [];
   var existing = [];
   var fechas = {};
+  var deltas = [];
   var iRec;
 
   for (iRec = 0; iRec < recs.length; iRec++) {
@@ -273,10 +274,14 @@ function upsertBatch_(sh, recs, headers) {
     d.supervisorDni = String(d.supervisorDni || '').trim();
     var values = buildRow_(headers, d, id);
     if (byId.hasOwnProperty(id)) {
-      updates.push({ row: byId[id], values: values });
+      var rowNum = byId[id];
+      var oldVals = sh.getRange(rowNum, 1, 1, headers.length).getValues()[0];
+      updates.push({ row: rowNum, values: values });
+      deltas.push({ old: oldVals, neu: values });
       existing.push(id);
     } else {
       appends.push(values);
+      deltas.push({ old: null, neu: values });
       byId[id] = -1;
       accepted.push(id);
     }
@@ -289,7 +294,8 @@ function upsertBatch_(sh, recs, headers) {
     accepted: accepted,
     existing: existing,
     changed: accepted.length + updates.length > 0,
-    fechas: Object.keys(fechas)
+    fechas: Object.keys(fechas),
+    deltas: deltas
   };
 }
 
@@ -469,10 +475,25 @@ function supervisorKey_(dni, nombre, nameToDni) {
   return nom;
 }
 
-function groupLogToDays_(headers, values) {
+function loadMananaAv_(sh, headers, isoList) {
+  var map = {};
+  var rows = readLogForFechas_(sh, headers, isoList);
+  (rows || []).forEach(function (row) {
+    if (turnoCampoOnly_(row, headers) !== 'Mañana') return;
+    var f = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    var lote = String(cell_(row, headers, 'Lote') || '').trim();
+    if (f && lote) map[f + '|' + lote] = num(cell_(row, headers, 'Avance') || cell_(row, headers, 'Area'));
+  });
+  return map;
+}
+
+function groupLogToDays_(headers, values, mananaAvExtra) {
   var groups = {};
   var order = [];
   var mananaAv = {};
+  if (mananaAvExtra) {
+    Object.keys(mananaAvExtra).forEach(function (k) { mananaAv[k] = mananaAvExtra[k]; });
+  }
   (values || []).forEach(function (row) {
     if (turnoCampoOnly_(row, headers) !== 'Mañana') return;
     var f = toIsoFecha_(cell_(row, headers, 'Fecha'));
@@ -557,6 +578,280 @@ function writeByDay_(ss, byDay) {
     var sh = daySheet_(ss, iso);
     if (sh) writeDaySheet_(sh, byDay[iso]);
   });
+}
+
+function dayRowKey_(row) {
+  return [
+    String(row[2] || '').trim(),
+    String(row[3] || '').trim(),
+    String(row[4] || '').trim(),
+    String(row[5] || '').trim(),
+    String(row[6] || '').trim()
+  ].join('|');
+}
+
+function readDaySheetRows_(sh) {
+  var cols = RESUMEN_HEADERS.length;
+  var last = sh.getLastRow();
+  if (last < 3) return [];
+  var data = sh.getRange(2, 1, last - 1, cols).getValues();
+  return data.filter(function (r) {
+    if (String(r[0] || '').toUpperCase() === 'TOTAL') return false;
+    return String(r[2] || '') || String(r[4] || '') || num(r[7]) || num(r[13]);
+  });
+}
+
+function mergeHoraLabel_(a, b) {
+  a = String(a || '').trim();
+  b = String(b || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  if (a === b) return a;
+  var partsA = a.split(/\s*\/\s*/);
+  var partsB = b.split(/\s*\/\s*/);
+  var man = horaMin_(partsA[0] || '', partsB[0] || '');
+  var tar = horaMin_(partsA[1] || '', partsB[1] || '');
+  if (partsA.length > 1 || partsB.length > 1) {
+    if (man && tar) return man + ' / ' + tar;
+    return tar || man || a;
+  }
+  return horaMin_(a, b);
+}
+
+function applyDayRows_(map, order, rows, sign) {
+  (rows || []).forEach(function (r) {
+    var k = dayRowKey_(r);
+    if (!map[k]) {
+      if (sign < 0) return;
+      map[k] = r.slice(0, RESUMEN_HEADERS.length);
+      order.push(k);
+      return;
+    }
+    var cur = map[k];
+    cur[7] = num(cur[7]) + sign * num(r[7]);
+    cur[11] = Math.round((num(cur[11]) + sign * num(r[11])) * 1000) / 1000;
+    cur[13] = Math.round(num(cur[13]) + sign * num(r[13]));
+    if (sign > 0) {
+      cur[12] = Math.max(num(cur[12]), num(r[12]));
+      cur[16] = mergeHoraLabel_(cur[16], r[16]);
+      if (!cur[9]) cur[9] = r[9] || RESPONSABLE_FIJO;
+    }
+    cur[14] = num(cur[11]) > 0 ? Math.round(num(cur[13]) / num(cur[11])) : '';
+    cur[15] = num(cur[12]) > 0 ? Math.round(num(cur[13]) / num(cur[12])) : '';
+    if (num(cur[7]) <= 0 && num(cur[13]) <= 0 && Math.abs(num(cur[11])) < 0.0005) {
+      delete map[k];
+    }
+  });
+}
+
+/** Suma (o resta en reenvíos) solo el lote de este POST sobre la hoja del día. */
+function mergeDaysFromDeltas_(ss, headers, deltas, logSh) {
+  var oldRows = [];
+  var newRows = [];
+  var fechas = {};
+  (deltas || []).forEach(function (d) {
+    if (d.old) {
+      oldRows.push(d.old);
+      var fo = toIsoFecha_(cell_(d.old, headers, 'Fecha'));
+      if (fo) fechas[fo] = true;
+    }
+    if (d.neu) {
+      newRows.push(d.neu);
+      var fn = toIsoFecha_(cell_(d.neu, headers, 'Fecha'));
+      if (fn) fechas[fn] = true;
+    }
+  });
+  var isoList = Object.keys(fechas);
+  if (!isoList.length) return;
+  var mananaAv = loadMananaAv_(logSh, headers, isoList);
+  var bySub = groupLogToDays_(headers, oldRows, mananaAv);
+  var byAdd = groupLogToDays_(headers, newRows, mananaAv);
+  isoList.forEach(function (iso) {
+    var sh = daySheet_(ss, iso);
+    if (!sh) return;
+    var map = {};
+    var order = [];
+    readDaySheetRows_(sh).forEach(function (r) {
+      var k = dayRowKey_(r);
+      if (!map.hasOwnProperty(k)) order.push(k);
+      map[k] = r.slice(0, RESUMEN_HEADERS.length);
+    });
+    applyDayRows_(map, order, bySub[iso] || [], -1);
+    applyDayRows_(map, order, byAdd[iso] || [], 1);
+    var out = [];
+    order.forEach(function (k) {
+      if (map[k]) out.push(map[k]);
+    });
+    writeDaySheet_(sh, out);
+  });
+}
+
+function respKeyFromLogRow_(row, headers) {
+  var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
+  var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
+  var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
+  if (!fecha || (!nombre && !dni)) return '';
+  return fecha + '|' + (dni.length === 8 ? dni : nombre.toUpperCase());
+}
+
+function contribResponsables_(headers, values) {
+  var map = {};
+  (values || []).forEach(function (row) {
+    var key = respKeyFromLogRow_(row, headers);
+    if (!key) return;
+    var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
+    var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
+    var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
+    var turnoCampo = turnoCampoOnly_(row, headers);
+    var jarras = num(cell_(row, headers, 'Total Jarras'));
+    if (!(jarras > 0)) jarras = num(cell_(row, headers, 'Jarras Conv')) + num(cell_(row, headers, 'Jarras China'));
+    var kilos = num(cell_(row, headers, 'Total Kg'));
+    if (!(kilos > 0)) kilos = num(cell_(row, headers, 'Kg Conv')) + num(cell_(row, headers, 'Kg China'));
+    var hr = horaCorta_(cell_(row, headers, 'Hora registro') || cell_(row, headers, 'Hora envío'));
+    if (!map[key]) {
+      map[key] = {
+        iso: fecha,
+        fecha: fmtDate(fecha),
+        supervisor: nombre || dni,
+        dni: dni,
+        manana: false,
+        tarde: false,
+        jarras: 0,
+        kilos: 0,
+        horaManana: '',
+        horaTarde: ''
+      };
+    }
+    var g = map[key];
+    if (nombre) g.supervisor = nombre;
+    if (dni) g.dni = dni;
+    g.jarras += jarras;
+    g.kilos += kilos;
+    if (turnoCampo === 'Tarde') {
+      g.tarde = true;
+      if (hr) g.horaTarde = hr;
+    } else {
+      g.manana = true;
+      if (hr) g.horaManana = hr;
+    }
+  });
+  return map;
+}
+
+function mergeResponsablesFromDeltas_(ss, headers, deltas) {
+  var oldRows = [];
+  var newRows = [];
+  (deltas || []).forEach(function (d) {
+    if (d.old) oldRows.push(d.old);
+    if (d.neu) newRows.push(d.neu);
+  });
+  var sub = contribResponsables_(headers, oldRows);
+  var add = contribResponsables_(headers, newRows);
+  var sh = ensureRespSheet_(ss);
+  var map = {};
+  var order = [];
+  if (sh.getLastRow() > 1) {
+    var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+    var old = sh.getRange(2, 1, sh.getLastRow(), have.length).getValues();
+    var fi = have.indexOf('Fecha');
+    var si = have.indexOf('Supervisor');
+    var di = have.indexOf('Supervisor DNI');
+    var ti = have.indexOf('Turno campo');
+    var ji = have.indexOf('Jarras');
+    var ki = have.indexOf('Kilos');
+    var hi = have.indexOf('Hora registro');
+    old.forEach(function (row) {
+      var fechaDisp = row[fi >= 0 ? fi : 0];
+      var nombre = row[si >= 0 ? si : 1];
+      var dni = row[di >= 0 ? di : 2];
+      var iso = toIsoFecha_(fechaDisp);
+      if (!iso) {
+        var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(fechaDisp || '').trim());
+        if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+      }
+      var key = (iso || '') + '|' + (String(dni || '').replace(/\D/g, '').slice(0, 8).length === 8
+        ? String(dni || '').replace(/\D/g, '').slice(0, 8)
+        : String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase());
+      if (!key || key === '|') return;
+      var tc = String(row[ti >= 0 ? ti : 3] || '');
+      map[key] = {
+        iso: iso,
+        fecha: fmtDate(iso) || String(fechaDisp || ''),
+        supervisor: String(nombre || '').trim() || String(dni || ''),
+        dni: String(dni || '').replace(/\D/g, '').slice(0, 8),
+        manana: /mañana/i.test(tc),
+        tarde: /tarde/i.test(tc),
+        jarras: num(row[ji >= 0 ? ji : 4]),
+        kilos: num(row[ki >= 0 ? ki : 5]),
+        horaManana: '',
+        horaTarde: ''
+      };
+      var hr = horaCorta_(row[hi >= 0 ? hi : 6]);
+      if (map[key].tarde) map[key].horaTarde = hr;
+      else map[key].horaManana = hr;
+      order.push(key);
+    });
+  }
+  function applyResp(contrib, sign) {
+    Object.keys(contrib).forEach(function (key) {
+      var c = contrib[key];
+      if (!map[key]) {
+        if (sign < 0) return;
+        map[key] = {
+          iso: c.iso,
+          fecha: c.fecha,
+          supervisor: c.supervisor,
+          dni: c.dni,
+          manana: false,
+          tarde: false,
+          jarras: 0,
+          kilos: 0,
+          horaManana: '',
+          horaTarde: ''
+        };
+        order.push(key);
+      }
+      var g = map[key];
+      if (c.supervisor) g.supervisor = c.supervisor;
+      if (c.dni) g.dni = c.dni;
+      g.jarras = num(g.jarras) + sign * num(c.jarras);
+      g.kilos = num(g.kilos) + sign * num(c.kilos);
+      if (sign > 0) {
+        if (c.manana) {
+          g.manana = true;
+          if (c.horaManana) g.horaManana = c.horaManana;
+        }
+        if (c.tarde) {
+          g.tarde = true;
+          if (c.horaTarde) g.horaTarde = c.horaTarde;
+        }
+      }
+      if (num(g.jarras) <= 0 && num(g.kilos) <= 0) delete map[key];
+    });
+  }
+  applyResp(sub, -1);
+  applyResp(add, 1);
+  var rows = [];
+  order.forEach(function (key) {
+    var g = map[key];
+    if (!g) return;
+    var turnoCampo = g.manana && g.tarde ? 'Mañana / Tarde' : g.tarde ? 'Tarde' : 'Mañana';
+    var hora = g.tarde && g.horaTarde ? g.horaTarde : g.horaManana || g.horaTarde || '';
+    rows.push([
+      g.fecha,
+      g.supervisor,
+      g.dni,
+      turnoCampo,
+      Math.round(g.jarras),
+      Math.round(g.kilos * 100) / 100,
+      hora
+    ]);
+  });
+  rows.sort(function (a, b) {
+    var c = String(a[0]).localeCompare(String(b[0]));
+    return c || String(a[1]).localeCompare(String(b[1]), 'es');
+  });
+  writeResponsablesSheet_(sh, rows);
 }
 
 function rebuildDays_(ss, headers, values, isoList) {
@@ -740,20 +1035,11 @@ function rebuildResponsables_(ss, headers, values, isoList) {
 }
 
 function rebuildResumen() {
+  // Ya no reconstruye desde _lotes: si borraste la hoja del día, no se revive el historial.
+  // El resumen solo crece con cada Enviar (suma en el mismo módulo).
   var ss = SpreadsheetApp.getActive();
-  var prod = logSheet_(ss);
   dropOldResumen_(ss);
-  var byDay = {};
-  var headers = null;
-  var values = [];
-  if (prod && prod.getLastRow() > 1) {
-    headers = ensureHeaders_(prod);
-    values = prod.getRange(2, 1, prod.getLastRow() - 1, headers.length).getValues();
-    byDay = groupLogToDays_(headers, values);
-  }
-  writeByDay_(ss, byDay);
-  if (headers) rebuildResponsables_(ss, headers, values, null);
-  else ensureRespSheet_(ss);
+  ensureRespSheet_(ss);
 }
 
 function styleResumen_(sh, lastData, totRow) {

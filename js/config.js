@@ -4,7 +4,7 @@ window.APP = window.APP || {};
 APP.CONFIG = {
   _ep: "https://script.google.com/macros/s/AKfycbwM2wRWmQDlGEcZbRzDc2B6p73GgS2uW2tHurRWw2g0hEYiCa_ZRqjqYwk0mJoF5LU35w/exec",
   APP_NAME: "Reporte KG",
-  VERSION: "2.0.90",
+  VERSION: "2.0.92",
   TZ: "America/Lima",
   LOCALE: "es-PE",
   YEAR: 2026,

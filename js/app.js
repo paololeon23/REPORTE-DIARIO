@@ -29,6 +29,18 @@ APP.App = (() => {
     return APP.API.todayKey();
   }
 
+  function supDni() {
+    return String(state.session.supervisorDni || "").trim();
+  }
+
+  function dayRecords(fecha, turnoCampo) {
+    const day = fecha || today();
+    const dni = supDni();
+    if (!dni) return [];
+    if (turnoCampo) return APP.API.localRecords(day, turnoCampo, dni);
+    return APP.API.localRecords(day, null, dni);
+  }
+
   function fmtDate(iso) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
     return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
@@ -92,8 +104,8 @@ APP.App = (() => {
       : state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     const fecha = (pack && pack.model && pack.model.fecha) || today();
     const records = turno === "Tarde"
-      ? APP.API.localRecords(fecha)
-      : APP.API.localRecords(fecha, "Mañana");
+      ? dayRecords(fecha)
+      : dayRecords(fecha, "Mañana");
     const session = { ...state.session, turnoCampo: turno };
     const use = pack && turno === (pack.model && pack.model.turnoCampo)
       ? pack
@@ -193,7 +205,7 @@ APP.App = (() => {
   }
 
   function morningAvanceOf(lote) {
-    const rec = APP.API.recordOf(lote, today(), "Mañana");
+    const rec = APP.API.recordOf(lote, today(), "Mañana", supDni());
     const n = Number(rec && rec.avance);
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
@@ -349,12 +361,12 @@ APP.App = (() => {
   }
 
   function dayModel() {
-    const records = APP.API.localRecords(today());
+    const records = dayRecords();
     return APP.Excel.buildModel({ session: state.session, fecha: today(), records });
   }
 
   function paintDay() {
-    const records = APP.API.localRecords(today());
+    const records = dayRecords();
     const model = dayModel();
     const t = model.totals;
     $("#day-kpis").innerHTML = `
@@ -406,7 +418,7 @@ APP.App = (() => {
             </div>`;
           })
           .join("")
-      : `<p class="empty">Aún no hay lotes hoy.</p>`;
+      : `<p class="empty">${supDni() ? "Aún no hay lotes hoy." : "Elige un supervisor para ver su día."}</p>`;
     $("#lot-list").querySelectorAll("[data-edit]").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
@@ -422,14 +434,14 @@ APP.App = (() => {
   }
 
   async function removeLote(loteId, turnoCampo) {
-    const rec = APP.API.recordOf(loteId, today(), turnoCampo);
+    const rec = APP.API.recordOf(loteId, today(), turnoCampo, supDni());
     if (APP.API.isUploaded(rec)) {
       await feedback("No se puede eliminar", "Este lote ya está subido. Si hay un error, edítalo.");
       return;
     }
     const ok = await ask("Eliminar lote", `Se quita el lote ${loteId} de hoy. No está subido. ¿Seguro?`, "Eliminar");
     if (!ok) return;
-    const res = APP.API.removeTodayLote(loteId, turnoCampo);
+    const res = APP.API.removeTodayLote(loteId, turnoCampo, supDni());
     if (!res.ok) {
       await feedback("No se eliminó", res.reason === "uploaded" ? "Este lote ya está subido." : "No se encontró el lote.");
       return;
@@ -445,7 +457,7 @@ APP.App = (() => {
     state.session.turnoCampo = tc;
     persistSession();
     paintPeople({ keepTurno: true });
-    const rec = APP.API.recordOf(loteId, today(), tc);
+    const rec = APP.API.recordOf(loteId, today(), tc, supDni());
     const L = APP.Data.findLote(loteId) || (rec && {
       lote: rec.lote,
       md: rec.md,
@@ -592,21 +604,30 @@ APP.App = (() => {
           if (nextDni && nextDni === prevDni) return;
           // Primera vez: elegir sin preguntar. Solo confirmar si ya había supervisor.
           if (prevDni) {
-            const n = APP.API.todayCount();
+            const n = APP.API.todayCount(prevDni);
             const ok = await ask(
               "Cambiar supervisor",
               n
-                ? "Los lotes de hoy se quedan. Los nuevos se registran con el supervisor nuevo. ¿Seguro?"
-                : "Vas a cambiar de supervisor. ¿Seguro?",
+                ? "Se borrarán los lotes de hoy de este supervisor en el celular (para no cargar la app). El historial Excel no se toca. ¿Seguro?"
+                : "Vas a cambiar de supervisor. El historial no se toca. ¿Seguro?",
               "Cambiar"
             );
             if (!ok) return;
+            APP.API.purgeTodayLocal(prevDni);
           }
           state.session.supervisorDni = nextDni;
           state.session.supervisorNombre = nextName;
+          state.session.turnoCampo = APP.API.sendCount(nextDni) >= 1 ? "Tarde" : "Mañana";
+          state.session.scannerDni = "";
+          state.session.scannerNombre = "";
+          state.session.jornales = 0;
+          state.session.grupo = "";
+          state.session.etapa = "";
+          resetLoteInputs();
           persistSession();
           paintPeople();
           paintDay();
+          paintHistorial();
           paintStatus();
         },
       });
@@ -640,7 +661,7 @@ APP.App = (() => {
           return opts
             .map((o) => {
               const tc = isTarde() ? "Tarde" : "Mañana";
-              const rec = APP.API.recordOf(o.id, today(), tc) || (isTarde() ? APP.API.recordOf(o.id, today(), "Mañana") : null);
+              const rec = APP.API.recordOf(o.id, today(), tc, supDni()) || (isTarde() ? APP.API.recordOf(o.id, today(), "Mañana", supDni()) : null);
               if (!rec) return o;
               const av = Number(rec.avance);
               const ha = Number.isFinite(av) && av > 0 ? av : 0;
@@ -661,8 +682,8 @@ APP.App = (() => {
         onSelect: (opt) => {
           const L = opt.lote || APP.Data.findLote(opt.id);
           if (!L) return;
-          const tarde = APP.API.recordOf(L.lote, today(), "Tarde");
-          const manana = APP.API.recordOf(L.lote, today(), "Mañana");
+          const tarde = APP.API.recordOf(L.lote, today(), "Tarde", supDni());
+          const manana = APP.API.recordOf(L.lote, today(), "Mañana", supDni());
           fillLoteForm(L, tarde || (isTarde() ? null : manana));
           persistSession();
         },
@@ -815,7 +836,7 @@ APP.App = (() => {
   }
 
   function liveRecords() {
-    const list = APP.API.localRecords(today()).slice();
+    const list = dayRecords().slice();
     const draft = draftRecord();
     if (!draft) return list;
     const tc = draft.turnoCampo || "Mañana";
@@ -1122,7 +1143,7 @@ APP.App = (() => {
     const draft = draftRecord();
     if (!draft) return "";
     const tc = draft.turnoCampo || "Mañana";
-    const saved = APP.API.recordOf(draft.lote, today(), tc);
+    const saved = APP.API.recordOf(draft.lote, today(), tc, supDni());
     if (!saved) {
       return `Hay un lote ${draft.lote} en pantalla sin Guardar. No irá en el envío. Pulsa Guardar lote primero.`;
     }
@@ -1156,7 +1177,7 @@ APP.App = (() => {
         return;
       }
       const isSecond = sent >= 1;
-      const todayN = APP.API.todayCount();
+      const todayN = APP.API.todayCount(dni);
       if (!todayN) {
         if (!auto) await feedback("Sin lotes", "Primero guarda los lotes del día.");
         return;
@@ -1165,8 +1186,8 @@ APP.App = (() => {
       state.session.turnoCampo = turnoEnvio;
       persistSession();
       paintPeople();
-      if (isSecond) APP.API.queueTodayForResend();
-      const queue = APP.API.pendingRecords().filter((r) => String(r.fecha) === today());
+      if (isSecond) APP.API.queueTodayForResend(dni);
+      const queue = APP.API.pendingRecords(dni).filter((r) => String(r.fecha) === today());
       if (!queue.length) {
         if (!auto) await feedback("Ya está enviado", "No hay nada nuevo por enviar.");
         return;
@@ -1211,6 +1232,7 @@ APP.App = (() => {
       const result = await APP.API.flush({
         summary: totalTxt,
         turnoCampo: turnoEnvio,
+        supervisorDni: dni,
         onProgress: () => {
           showLoader("Enviando", isSecond ? "Enviando el reporte de tarde…" : "Enviando el reporte de mañana…");
         },
@@ -1252,17 +1274,27 @@ APP.App = (() => {
 
       if (isSecond) {
         rememberExcel(null, "Tarde");
-        APP.API.markTransferred();
-        const wiped = APP.API.clearTodayRecords();
+        APP.API.markTransferred(dni);
+        const wiped = APP.API.clearTodayRecords(dni);
         if (!wiped || !wiped.ok) {
           if (!auto) await feedback("Revisa el envío", "Algo quedó sin confirmar. No se borró el día. Pulsa Enviar otra vez.");
           return;
         }
         APP.API.clearOutboxAll();
-        emptyWorkspace();
+        // Solo limpia el formulario de este supervisor. No toca lotes de otros ni el historial.
+        resetLoteInputs();
+        state.session.scannerDni = "";
+        state.session.scannerNombre = "";
+        state.session.jornales = 0;
+        state.session.grupo = "";
+        state.session.etapa = "";
+        state.session.turnoCampo = "Mañana";
+        persistSession();
+        paintPeople();
+        paintDay();
         paintHistorial();
         paintStatus();
-        await feedback("Tarde enviada", `Listo: ${totalTxt}. El día se limpió. Los Excel quedan en Historial.`, auto ? { ms: 2200 } : undefined);
+        await feedback("Tarde enviada", `Listo: ${totalTxt}. Se limpió solo el día de este supervisor. El historial se mantiene.`, auto ? { ms: 2200 } : undefined);
         return;
       }
 
@@ -1285,7 +1317,8 @@ APP.App = (() => {
 
   function hasInterruptedSend() {
     try {
-      return APP.API.pendingCount() > 0 && APP.API.lotPendingCount() > 0;
+      const dni = String(state.session.supervisorDni || "").trim();
+      return APP.API.pendingCount() > 0 && APP.API.pendingRecords(dni || undefined).length > 0;
     } catch (_) {
       return false;
     }

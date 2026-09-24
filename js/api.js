@@ -107,8 +107,16 @@ APP.API = (() => {
     return (
       String(a.fecha) === String(b.fecha) &&
       String(a.lote) === String(b.lote) &&
-      String(a.turnoCampo || "Mañana") === String(b.turnoCampo || "Mañana")
+      String(a.turnoCampo || "Mañana") === String(b.turnoCampo || "Mañana") &&
+      String(a.supervisorDni || "").trim() === String(b.supervisorDni || "").trim()
     );
+  }
+
+  function matchSupervisor_(r, supervisorDni) {
+    if (supervisorDni == null || supervisorDni === false) return true;
+    const want = String(supervisorDni || "").trim();
+    if (!want) return true;
+    return String((r && r.supervisorDni) || "").trim() === want;
   }
 
   function healSending(list) {
@@ -127,14 +135,16 @@ APP.API = (() => {
     return keep;
   }
 
-  function localRecords(fecha, turnoCampo) {
+  function localRecords(fecha, turnoCampo, supervisorDni) {
     const day = fecha || todayKey();
     const byKey = {};
     healSending(all()).forEach((r) => {
-      if (String(r.fecha) !== day) return;
+      if (!r || String(r.fecha) !== day) return;
+      if (!matchSupervisor_(r, supervisorDni)) return;
       const tc = r.turnoCampo || "Mañana";
       if (turnoCampo && tc !== turnoCampo) return;
-      byKey[String(r.lote) + "|" + tc] = r;
+      const dni = String(r.supervisorDni || "").trim() || String(supervisorDni || "").trim();
+      byKey[String(r.lote) + "|" + tc + "|" + dni] = r;
     });
     return Object.values(byKey).sort((a, b) => {
       const c = String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
@@ -142,12 +152,14 @@ APP.API = (() => {
     });
   }
 
-  function recordOf(lote, fecha, turnoCampo) {
-    return localRecords(fecha, turnoCampo || "Mañana").find((r) => String(r.lote) === String(lote)) || null;
+  function recordOf(lote, fecha, turnoCampo, supervisorDni) {
+    return localRecords(fecha, turnoCampo || "Mañana", supervisorDni).find((r) => String(r.lote) === String(lote)) || null;
   }
 
-  function pendingRecords() {
-    return healSending(all()).filter((r) => r && r.lote && r.syncStatus !== "confirmed");
+  function pendingRecords(supervisorDni) {
+    return healSending(all()).filter(
+      (r) => r && r.lote && r.syncStatus !== "confirmed" && matchSupervisor_(r, supervisorDni)
+    );
   }
 
   /** Lotes guardados aún no confirmados en Sheets (interno). */
@@ -216,13 +228,15 @@ APP.API = (() => {
     writeOutbox({ fecha: todayKey(), items: [] }, true);
   }
 
-  function todayRecords() {
+  function todayRecords(supervisorDni) {
     const day = todayKey();
-    return healSending(all()).filter((r) => r && r.lote && String(r.fecha) === day);
+    return healSending(all()).filter(
+      (r) => r && r.lote && String(r.fecha) === day && matchSupervisor_(r, supervisorDni)
+    );
   }
 
-  function todayCount() {
-    return todayRecords().length;
+  function todayCount(supervisorDni) {
+    return todayRecords(supervisorDni).length;
   }
 
   function wasMorningSent() {
@@ -260,29 +274,47 @@ APP.API = (() => {
     return n;
   }
 
-  function isTodayClosed() {
+  function closeMap() {
     try {
-      const s = JSON.parse(localStorage.getItem(CLOSE_KEY) || "null");
-      return !!(s && s.fecha === todayKey() && s.closed);
+      const raw = JSON.parse(localStorage.getItem(CLOSE_KEY) || "null");
+      const day = todayKey();
+      if (!raw || raw.fecha !== day) return { fecha: day, by: {} };
+      if (raw.by && typeof raw.by === "object") return { fecha: day, by: { ...raw.by } };
+      // Legado closed global: no bloquear a otros supervisores.
+      return { fecha: day, by: {} };
     } catch {
-      return false;
+      return { fecha: todayKey(), by: {} };
     }
   }
 
-  function setTodayClosed(closed) {
+  function isTodayClosed(supervisorDni) {
+    const id = String(supervisorDni || "").trim();
+    if (!id) return false;
+    return !!closeMap().by[id];
+  }
+
+  function setTodayClosed(closed, supervisorDni) {
+    const id = String(supervisorDni || "").trim();
+    if (!id) return;
+    const map = closeMap();
+    if (closed) map.by[id] = true;
+    else delete map.by[id];
     try {
-      localStorage.setItem(CLOSE_KEY, JSON.stringify({ fecha: todayKey(), closed: !!closed }));
+      localStorage.setItem(CLOSE_KEY, JSON.stringify(map));
     } catch (_) {}
   }
 
-  function queueTodayForResend() {
+  function queueTodayForResend(supervisorDni) {
     const day = todayKey();
+    const dni = String(supervisorDni || "").trim();
     write(
-      all().map((r) =>
-        r && r.lote && String(r.fecha) === day ? { ...r, syncStatus: "pending" } : r
-      )
+      all().map((r) => {
+        if (!r || !r.lote || String(r.fecha) !== day) return r;
+        if (dni && !matchSupervisor_(r, dni)) return r;
+        return { ...r, syncStatus: "pending" };
+      })
     );
-    setTodayClosed(false);
+    if (dni) setTodayClosed(false, dni);
   }
 
   function patchMany(ids, extra, silent) {
@@ -308,10 +340,11 @@ APP.API = (() => {
 
   function stampForSend(rec) {
     const session = loadSession() || {};
-    const dni = String(session.supervisorDni || rec.supervisorDni || "").trim();
+    // No pisar el supervisor del lote con el de la sesión actual (celular compartido).
+    const dni = String(rec.supervisorDni || session.supervisorDni || "").trim();
     const nombre = APP.Data
-      ? APP.Data.fullName(dni, session.supervisorNombre || rec.supervisor)
-      : session.supervisorNombre || rec.supervisor || "";
+      ? APP.Data.fullName(dni, rec.supervisor || session.supervisorNombre)
+      : rec.supervisor || session.supervisorNombre || "";
     return catalogPatch({
       ...rec,
       supervisorDni: dni || rec.supervisorDni,
@@ -321,8 +354,15 @@ APP.API = (() => {
 
   async function submit(payload) {
     pruneOldRecords();
-    if (isTodayClosed()) return { ok: false, reason: "closed" };
     const data = catalogPatch(payload.data || {});
+    const session = loadSession() || {};
+    if (!String(data.supervisorDni || "").trim()) {
+      data.supervisorDni = String(session.supervisorDni || "").trim();
+    }
+    if (!String(data.supervisor || "").trim()) {
+      data.supervisor = session.supervisorNombre || "";
+    }
+    if (isTodayClosed(data.supervisorDni)) return { ok: false, reason: "closed" };
     data.fecha = todayKey();
     data.horaEnvio = limaDateTime();
     const prev = all().find((r) => sameLoteDay(r, data));
@@ -407,21 +447,27 @@ APP.API = (() => {
     const onProgress = opts && opts.onProgress;
     const summary = opts && opts.summary ? String(opts.summary) : "";
     const turnoCampo = opts && opts.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
+    const session = loadSession() || {};
+    const supervisorDni = String(
+      (opts && opts.supervisorDni != null ? opts.supervisorDni : session.supervisorDni) || ""
+    ).trim();
+    const pendingOf = () => pendingRecords(supervisorDni || undefined);
     pruneOldRecords();
     if (!endpoint()) {
-      return { sent: 0, left: lotPendingCount(), reason: "no-ep", reports: pendingCount() };
+      return { sent: 0, left: pendingOf().length, reason: "no-ep", reports: pendingCount() };
     }
 
     let sent = 0;
     let guard = 0;
     let failures = 0;
     while (guard++ < 80) {
-      const queue = pendingRecords();
+      const queue = pendingOf();
       if (!queue.length) break;
       const batch = queue.slice(0, BATCH);
       const ids = batch.map((r) => r.clientId);
       patchMany(ids, { syncStatus: "sending", syncStartedAt: Date.now() }, true);
-      if (onProgress) onProgress({ sent, left: lotPendingCount(), total: sent + lotPendingCount(), reports: pendingCount() });
+      const leftNow = pendingOf().length;
+      if (onProgress) onProgress({ sent, left: leftNow, total: sent + leftNow, reports: pendingCount() });
       try {
         const last = queue.length <= batch.length;
         const okIds = await sendBatch(batch, last, {
@@ -463,13 +509,13 @@ APP.API = (() => {
         );
         failures += 1;
         if (failures >= MAX_FLUSH_FAILURES) {
-          return { sent, left: lotPendingCount(), reason: "net", reports: pendingCount() };
+          return { sent, left: pendingOf().length, reason: "net", reports: pendingCount() };
         }
         await tick(Math.min(2000, 500 * failures));
       }
       await tick(120);
     }
-    const left = lotPendingCount();
+    const left = pendingOf().length;
     if (left === 0) clearOutboxReport(turnoCampo);
     window.dispatchEvent(new Event("app:activity"));
     return {
@@ -537,10 +583,14 @@ APP.API = (() => {
     if (!records.length) return null;
     const now = Date.now();
     const session = { ...(opts.session || {}), turnoCampo };
+    const supDni = String(session.supervisorDni || "").trim();
     const model = opts.model || {};
     const t = model.totals || {};
     const list = pruneHistory(readHistory());
-    const same = (item) => item.fecha === fecha && (item.turnoCampo || "Mañana") === turnoCampo;
+    const same = (item) =>
+      item.fecha === fecha &&
+      (item.turnoCampo || "Mañana") === turnoCampo &&
+      String((item.session && item.session.supervisorDni) || "").trim() === supDni;
     const prev = list.find(same);
     const slug = turnoCampo === "Tarde" ? "tarde" : "manana";
     const item = {
@@ -549,7 +599,7 @@ APP.API = (() => {
       turnoCampo,
       savedAt: now,
       expiresAt: now + DAY_MS,
-      pending: pendingCount() > 0 || !isTodayClosed(),
+      pending: pendingRecords(supDni).length > 0 || !isTodayClosed(supDni),
       name: opts.name || `reporte-cosecha-${fecha}-${slug}.xls`,
       supervisor: APP.Data ? APP.Data.fullName(session.supervisorDni, session.supervisorNombre) : session.supervisorNombre || "",
       lotes: records.length,
@@ -566,26 +616,57 @@ APP.API = (() => {
     return listHistory().find((item) => item.id === id) || null;
   }
 
-  function markHistoryIfClear() {
-    if (pendingCount() > 0) return 0;
-    setTodayClosed(true);
+  function markHistoryIfClear(supervisorDni) {
+    const dni = String(supervisorDni || "").trim();
+    if (pendingRecords(dni || undefined).length > 0) return 0;
+    if (dni) setTodayClosed(true, dni);
     const now = Date.now();
-    const list = pruneHistory(readHistory()).map((item) => ({ ...item, pending: false, transferredAt: now }));
+    const list = pruneHistory(readHistory()).map((item) => {
+      const itemDni = String((item.session && item.session.supervisorDni) || "").trim();
+      if (dni && itemDni && itemDni !== dni) return item;
+      return { ...item, pending: false, transferredAt: now };
+    });
     writeHistory(list);
     return list.length;
   }
 
-  function clearTodayRecords() {
+  /** Borra solo los lotes de hoy de ese supervisor. Sin DNI = no borra (evita wipe global). */
+  function clearTodayRecords(supervisorDni) {
     const day = todayKey();
+    const dni = String(supervisorDni || "").trim();
+    if (!dni) return { ok: false, reason: "no-supervisor" };
     const list = healSending(all());
-    const pendingToday = list.filter((r) => r && String(r.fecha) === day && r.syncStatus !== "confirmed");
+    const mine = list.filter((r) => r && String(r.fecha) === day && String(r.supervisorDni || "").trim() === dni);
+    const pendingToday = mine.filter((r) => r.syncStatus !== "confirmed");
     if (pendingToday.length) return { ok: false, reason: "pending", left: pendingToday.length };
-    write(list.filter((r) => String(r.fecha) !== day));
+    write(
+      list.filter((r) => {
+        if (!r || String(r.fecha) !== day) return true;
+        return String(r.supervisorDni || "").trim() !== dni;
+      })
+    );
     return { ok: true };
   }
 
-  function clearTodayLocal() {
-    clearTodayRecords();
+  /** Borra lotes de hoy (aunque estén pendientes). No toca el historial Excel. */
+  function purgeTodayLocal(supervisorDni) {
+    const day = todayKey();
+    const dni = String(supervisorDni || "").trim();
+    write(
+      all().filter((r) => {
+        if (!r || String(r.fecha) !== day) return true;
+        if (!dni) return false;
+        return String(r.supervisorDni || "").trim() !== dni;
+      })
+    );
+    clearOutboxAll();
+    if (dni) setTodayClosed(false, dni);
+    window.dispatchEvent(new Event("app:activity"));
+    return { ok: true };
+  }
+
+  function clearTodayLocal(supervisorDni) {
+    return clearTodayRecords(supervisorDni);
   }
 
   function wipeLocal() {
@@ -670,16 +751,16 @@ APP.API = (() => {
         records: forty,
       });
       push("I-outbox-one-report", !!(rep && pendingCount() === 1) && lotPendingCount() === 40);
-      setTodayClosed(true);
-      const blocked = await submit({ data: { lote: "NO", turnoCampo: "Mañana", totalJarras: 1 } });
+      setTodayClosed(true, "48533707");
+      const blocked = await submit({ data: { lote: "NO", turnoCampo: "Mañana", totalJarras: 1, supervisorDni: "48533707" } });
       push("C-closed-blocks-submit", blocked && blocked.ok === false && blocked.reason === "closed");
-      const noWipe = clearTodayRecords();
+      const noWipe = clearTodayRecords("48533707");
       push("C-close-keeps-pending", noWipe && noWipe.ok === false && lotPendingCount() === 40);
-      setTodayClosed(false);
+      setTodayClosed(false, "48533707");
       write(forty.map((r) => ({ ...r, syncStatus: "confirmed" })));
       clearOutboxAll();
-      markHistoryIfClear();
-      const wipedOk = clearTodayRecords();
+      markHistoryIfClear("48533707");
+      const wipedOk = clearTodayRecords("48533707");
       push("C-close-wipes-only-confirmed", !!(wipedOk && wipedOk.ok) && lotPendingCount() === 0 && pendingCount() === 0);
       const fakeOk = { ok: true, accepted: ["c-1"], existing: ["c-1"] };
       push("D-timeout-not-delete", lotPendingCount() >= 0 && fakeOk.existing[0] === "c-1");
@@ -712,13 +793,22 @@ APP.API = (() => {
     localRecords,
     recordOf,
     isUploaded: (r) => !!(r && (r.uploaded || r.syncStatus === "confirmed")),
-    removeTodayLote: (lote, turnoCampo) => {
+    removeTodayLote: (lote, turnoCampo, supervisorDni) => {
       const day = todayKey();
       const tc = turnoCampo === "Tarde" ? "Tarde" : "Mañana";
-      const rec = recordOf(lote, day, tc);
+      const dni = String(supervisorDni || "").trim();
+      const rec = recordOf(lote, day, tc, dni || undefined);
       if (!rec) return { ok: false, reason: "missing" };
       if (rec.uploaded || rec.syncStatus === "confirmed") return { ok: false, reason: "uploaded" };
-      write(all().filter((r) => !(r && String(r.fecha) === day && String(r.lote) === String(lote) && (r.turnoCampo || "Mañana") === tc)));
+      write(
+        all().filter((r) => {
+          if (!r || String(r.fecha) !== day || String(r.lote) !== String(lote) || (r.turnoCampo || "Mañana") !== tc) {
+            return true;
+          }
+          if (dni) return String(r.supervisorDni || "").trim() !== dni;
+          return false;
+        })
+      );
       return { ok: true };
     },
     pendingRecords,
@@ -744,6 +834,7 @@ APP.API = (() => {
     markTransferred: markHistoryIfClear,
     clearTodayRecords,
     clearTodayLocal,
+    purgeTodayLocal,
     wipeLocal,
     _selfTest: selfTest,
   };
