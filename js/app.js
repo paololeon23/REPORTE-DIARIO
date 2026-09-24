@@ -792,12 +792,14 @@ APP.App = (() => {
     const pendingBtn = $("#chip-pending");
     if (pendingBtn) {
       pendingBtn.onclick = () => {
-        const n = APP.API.pendingCount();
+        const reports = APP.API.pendingCount();
+        const lots = APP.API.lotPendingCount();
+        const n = reports > 0 ? lots : 0;
         feedback(
-          n ? (n === 1 ? "1 reporte por enviar" : `${n} reportes por enviar`) : "Nada por enviar",
+          n ? (n === 1 ? "1 lote por confirmar" : `${n} lotes por confirmar`) : "Nada por enviar",
           n
-            ? "Hay un envío que no terminó. Con señal, pulsa Enviar otra vez. Tus lotes siguen en el celular."
-            : "Los lotes Guardados están en el celular. Solo cuenta aquí cuando un Enviar no pudo completarse."
+            ? "El conteo baja solo cuando el servidor responde ok. Con señal, espera o pulsa Enviar otra vez."
+            : "Los lotes Guardados están en el celular. El pendiente aparece al pulsar Enviar."
         );
       };
     }
@@ -1233,8 +1235,15 @@ APP.App = (() => {
         summary: totalTxt,
         turnoCampo: turnoEnvio,
         supervisorDni: dni,
-        onProgress: () => {
-          showLoader("Enviando", isSecond ? "Enviando el reporte de tarde…" : "Enviando el reporte de mañana…");
+        onProgress: (p) => {
+          const left = Number(p && p.left) || 0;
+          const done = Number(p && p.sent) || 0;
+          showLoader(
+            "Enviando",
+            left > 0 ? `Enviados ${done} · quedan ${left}` : `Enviados ${done} · confirmando…`
+          );
+          paintStatus();
+          paintDay();
         },
       });
       paintDay();
@@ -1394,7 +1403,11 @@ APP.App = (() => {
       const text = el.querySelector(".chip-text");
       if (text) text.textContent = on ? "En línea" : "Sin red";
     });
-    const n = APP.API.pendingCount();
+    // Con reporte en cola: mostrar lotes que faltan (baja en vivo al confirmar ok:true).
+    // Sin reporte: 0 (los guardados locales no cuentan como pend. hasta Enviar).
+    const reports = APP.API.pendingCount();
+    const lots = APP.API.lotPendingCount();
+    const n = reports > 0 ? lots : 0;
     document.querySelectorAll("#chip-pending-text, [data-chip-pending-text]").forEach((el) => {
       el.textContent = `${n} pend.`;
     });

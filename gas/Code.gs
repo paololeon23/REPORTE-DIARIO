@@ -7,7 +7,8 @@ var GREEN = '#1B5E20';
 var HEADERS = [
   'Fecha', 'Scanner', 'Scanner DNI', 'Supervisor', 'Supervisor DNI',
   'Grupo', 'Etapa', 'Lote', 'Fundo', 'Variedad', 'MD', 'Turno', 'Area', 'Avance',
-  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China', 'Total Jarras', 'Total Kg', 'Jornales', 'ClientId', 'TurnoCampo', 'Hora envío', 'Hora registro'
+  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China', 'Total Jarras', 'Total Kg', 'Jornales',
+  'TurnoCampo', 'Hora envío', 'Hora registro'
 ];
 var RESUMEN_HEADERS = [
   'Semana', 'Fecha', 'Tipo', 'Fundo', 'Módulo', 'Variedad', 'Turno',
@@ -22,10 +23,10 @@ var ACUM_HEADERS = [
   'Fecha', 'Semana', 'Supervisor', 'Supervisor DNI', 'Turno campo',
   'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Área',
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
-  'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn',
-  'ClientId', 'Hora registro'
+  'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
-var YEAR_REPORTE = 2026;
+var MERGE_CACHE_KEY = 'qb_merge_deltas_v1';
+var MERGE_TRIGGER_FN = 'runQueuedMerge_';
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -47,25 +48,97 @@ function doPost(e) {
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
     var result = upsertBatch_(sh, recs, headers);
-    // Suma solo este envío sobre lo que YA está en la hoja del día / Responsables.
-    // No reconstruye desde _lotes (si borras la hoja, no vuelve el historial).
-    if (body.rebuild !== false && result.changed && result.deltas && result.deltas.length) {
-      try {
-        mergeDaysFromDeltas_(ss, headers, result.deltas, sh);
-        mergeResponsablesFromDeltas_(ss, headers, result.deltas);
-        mergeReportesFromDeltas_(ss, headers, result.deltas);
-        mergeAcumuladoFromDeltas_(ss, headers, result.deltas);
-      } catch (rebuildErr) {}
+    // Responder ok YA (el Excel/_lotes ya guardó). El merge de hojas va en cola
+    // para que el celular no se quede en "pendiente" por un merge lento.
+    if (result.changed && result.deltas && result.deltas.length && body.rebuild !== false) {
+      queueMergeDeltas_(result.deltas);
     }
     return jsonOut_({
       ok: true,
       accepted: result.accepted || [],
-      existing: result.existing || []
+      existing: result.existing || [],
+      saved: (result.accepted || []).length + (result.existing || []).length
     });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
     try { lock.releaseLock(); } catch (e2) {}
+  }
+}
+
+function queueMergeDeltas_(deltas) {
+  try {
+    var payload = JSON.stringify(deltas || []);
+    if (payload.length > 90000) {
+      // Demasiado grande para cache: merge síncrono (raro).
+      var ss = SpreadsheetApp.getActive();
+      var sh = logSheet_(ss);
+      var headers = ensureHeaders_(sh);
+      mergeDaysFromDeltas_(ss, headers, deltas, sh);
+      mergeResponsablesFromDeltas_(ss, headers, deltas);
+      mergeAcumuladoFromDeltas_(ss, headers, deltas);
+      dropReporteSheets_(ss);
+      return;
+    }
+    var cache = CacheService.getScriptCache();
+    var prev = cache.get(MERGE_CACHE_KEY);
+    if (prev) {
+      try {
+        var prevArr = JSON.parse(prev);
+        if (Object.prototype.toString.call(prevArr) === '[object Array]') {
+          deltas = prevArr.concat(deltas || []);
+          payload = JSON.stringify(deltas);
+        }
+      } catch (e0) {}
+    }
+    cache.put(MERGE_CACHE_KEY, payload, 600);
+    ensureMergeTrigger_();
+  } catch (e1) {
+    try {
+      var ss2 = SpreadsheetApp.getActive();
+      var sh2 = logSheet_(ss2);
+      var headers2 = ensureHeaders_(sh2);
+      mergeDaysFromDeltas_(ss2, headers2, deltas, sh2);
+      mergeResponsablesFromDeltas_(ss2, headers2, deltas);
+      mergeAcumuladoFromDeltas_(ss2, headers2, deltas);
+    } catch (e2) {}
+  }
+}
+
+function ensureMergeTrigger_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var i;
+  for (i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === MERGE_TRIGGER_FN) return;
+  }
+  ScriptApp.newTrigger(MERGE_TRIGGER_FN).timeBased().after(1000).create();
+}
+
+function runQueuedMerge_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
+  try {
+    var cache = CacheService.getScriptCache();
+    var raw = cache.get(MERGE_CACHE_KEY);
+    if (!raw) return;
+    cache.remove(MERGE_CACHE_KEY);
+    var deltas = JSON.parse(raw);
+    if (!deltas || !deltas.length) return;
+    var ss = SpreadsheetApp.getActive();
+    var sh = logSheet_(ss);
+    var headers = ensureHeaders_(sh);
+    try { dropReporteSheets_(ss); } catch (e0) {}
+    try { mergeDaysFromDeltas_(ss, headers, deltas, sh); } catch (e1) {}
+    try { mergeResponsablesFromDeltas_(ss, headers, deltas); } catch (e2) {}
+    try { mergeAcumuladoFromDeltas_(ss, headers, deltas); } catch (e3) {}
+  } catch (err) {
+  } finally {
+    try { lock.releaseLock(); } catch (e4) {}
+    try {
+      ScriptApp.getProjectTriggers().forEach(function (t) {
+        if (t.getHandlerFunction() === MERGE_TRIGGER_FN) ScriptApp.deleteTrigger(t);
+      });
+    } catch (e5) {}
   }
 }
 
@@ -208,12 +281,13 @@ function buildRow_(headers, d, clientId) {
     'Total Jarras': d.totalJarras,
     'Total Kg': d.totalKg,
     'Jornales': d.jornales,
-    'ClientId': clientId || '',
     'TurnoCampo': normTurno_(d.turnoCampo),
     'Hora registro': horaCorta_(d.horaRegistro || d.horaEnvio),
     'Hora envío': d.horaEnvio || ''
   };
   return headers.map(function (name) {
+    // No guardamos ClientId (aunque la hoja vieja aún tenga la columna).
+    if (name === 'ClientId') return '';
     return map.hasOwnProperty(name) ? map[name] : '';
   });
 }
@@ -251,18 +325,18 @@ function writeRanges_(sh, updates, appends) {
   }
 }
 
-/** Solo lee ClientId (+ claves cortas) para upsert rápido. No carga toda la hoja. */
+/** Upsert por fecha+lote+turnoCampo+supervisor (sin ClientId). */
 function upsertBatch_(sh, recs, headers) {
   headers = headers || ensureHeaders_(sh);
   var last = sh.getLastRow();
-  var idCol = col_(headers, 'ClientId');
-  var byId = {};
-  if (last > 1 && idCol >= 0) {
-    var idVals = sh.getRange(2, idCol + 1, last - 1, 1).getValues();
+  var byKey = {};
+  if (last > 1) {
+    var nData = last - 1;
+    var data = sh.getRange(2, 1, nData, headers.length).getValues();
     var i;
-    for (i = 0; i < idVals.length; i++) {
-      var cid = String(idVals[i][0] || '').trim();
-      if (cid) byId[cid] = i + 2;
+    for (i = 0; i < data.length; i++) {
+      var k0 = fallbackKeyFromRow_(data[i], headers);
+      if (k0) byKey[k0] = i + 2;
     }
   }
 
@@ -277,25 +351,28 @@ function upsertBatch_(sh, recs, headers) {
   for (iRec = 0; iRec < recs.length; iRec++) {
     var item = recs[iRec] || {};
     var d = item.data || {};
-    var id = String(item.clientId || d.clientId || '').trim();
+    var echoId = String(item.clientId || d.clientId || '').trim();
     var lote = String(d.lote || '').trim();
-    if (!id || !lote) continue;
+    if (!lote) continue;
     d.fecha = toIsoFecha_(d.fecha) || String(d.fecha || '').trim();
     d.lote = lote;
     d.turnoCampo = normTurno_(d.turnoCampo);
     d.supervisorDni = String(d.supervisorDni || '').trim();
-    var values = buildRow_(headers, d, id);
-    if (byId.hasOwnProperty(id)) {
-      var rowNum = byId[id];
+    var key = fallbackKeyFromData_(d);
+    if (!key) continue;
+    var values = buildRow_(headers, d, '');
+    var ack = echoId || key;
+    if (byKey.hasOwnProperty(key) && byKey[key] > 0) {
+      var rowNum = byKey[key];
       var oldVals = sh.getRange(rowNum, 1, 1, headers.length).getValues()[0];
       updates.push({ row: rowNum, values: values });
       deltas.push({ old: oldVals, neu: values });
-      existing.push(id);
+      existing.push(ack);
     } else {
       appends.push(values);
       deltas.push({ old: null, neu: values });
-      byId[id] = -1;
-      accepted.push(id);
+      byKey[key] = -1;
+      accepted.push(ack);
     }
     if (d.fecha) fechas[d.fecha] = true;
   }
@@ -451,18 +528,26 @@ function dropOldResumen_(ss) {
 function writeDaySheet_(sh, rows) {
   var cols = RESUMEN_HEADERS.length;
   var wasEmpty = sh.getLastRow() === 0;
-  var totRow = (rows && rows.length ? rows.length : 0) + 2;
-  var clearTo = Math.max(sh.getLastRow(), totRow);
-  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent();
+  var n = rows && rows.length ? rows.length : 0;
+  var totRow = n + 2;
+  var clearTo = Math.max(sh.getLastRow(), totRow, 2);
+  if (clearTo > 0) {
+    sh.getRange(1, 1, clearTo, cols).clearContent().clearFormat();
+  }
 
   sh.getRange(1, 1, 1, cols).setValues([RESUMEN_HEADERS]);
   var lastData = 1;
-  if (rows && rows.length) {
-    sh.getRange(2, 1, rows.length, cols).setValues(rows);
-    lastData = 1 + rows.length;
+  if (n) {
+    sh.getRange(2, 1, n, cols).setValues(rows);
+    lastData = 1 + n;
+    // Datos siempre en peso normal (evita heredar negrita del TOTAL anterior).
+    sh.getRange(2, 1, n, cols)
+      .setFontWeight('normal')
+      .setBackground('#FFFFFF')
+      .setFontColor('#000000');
   }
   var empty = ['', '', '', '', '', '', '', 0, '', '', '', 0, 0, 0, '', '', ''];
-  if (rows && rows.length) {
+  if (n) {
     empty[7] = rows.reduce(function (a, r) { return a + num(r[7]); }, 0);
     empty[11] = Math.round(rows.reduce(function (a, r) { return a + num(r[11]); }, 0) * 100) / 100;
     empty[12] = rows.reduce(function (a, r) { return a + num(r[12]); }, 0);
@@ -594,19 +679,21 @@ function writeByDay_(ss, byDay) {
 
 function dayRowKey_(row) {
   return [
-    String(row[2] || '').trim(),
-    String(row[3] || '').trim(),
-    String(row[4] || '').trim(),
-    String(row[5] || '').trim(),
-    String(row[6] || '').trim()
+    String(row[2] || '').trim().toUpperCase(),
+    String(row[3] || '').trim().toUpperCase().replace(/\s+/g, ' '),
+    mdLabel_(row[4]),
+    String(row[5] || '').trim().toUpperCase().replace(/\s+/g, ' '),
+    turnoLote_(row[6])
   ].join('|');
 }
 
 function readDaySheetRows_(sh) {
   var cols = RESUMEN_HEADERS.length;
   var last = sh.getLastRow();
-  if (last < 3) return [];
-  var data = sh.getRange(2, 1, last - 1, cols).getValues();
+  // Fila 1 = encabezado, última = TOTAL → datos = last - 2 filas.
+  var nData = last - 2;
+  if (nData < 1) return [];
+  var data = sh.getRange(2, 1, nData, cols).getValues();
   return data.filter(function (r) {
     if (String(r[0] || '').toUpperCase() === 'TOTAL') return false;
     return String(r[2] || '') || String(r[4] || '') || num(r[7]) || num(r[13]);
@@ -647,6 +734,12 @@ function applyDayRows_(map, order, rows, sign) {
       cur[12] = Math.max(num(cur[12]), num(r[12]));
       cur[16] = mergeHoraLabel_(cur[16], r[16]);
       if (!cur[9]) cur[9] = r[9] || RESPONSABLE_FIJO;
+      // Preferir textos canónicos del envío nuevo
+      if (r[2]) cur[2] = r[2];
+      if (r[3]) cur[3] = r[3];
+      if (r[4] !== '' && r[4] != null) cur[4] = r[4];
+      if (r[5]) cur[5] = r[5];
+      if (r[6] !== '' && r[6] != null) cur[6] = r[6];
     }
     cur[14] = num(cur[11]) > 0 ? Math.round(num(cur[13]) / num(cur[11])) : '';
     cur[15] = num(cur[12]) > 0 ? Math.round(num(cur[13]) / num(cur[12])) : '';
@@ -685,14 +778,20 @@ function mergeDaysFromDeltas_(ss, headers, deltas, logSh) {
     var order = [];
     readDaySheetRows_(sh).forEach(function (r) {
       var k = dayRowKey_(r);
-      if (!map.hasOwnProperty(k)) order.push(k);
-      map[k] = r.slice(0, RESUMEN_HEADERS.length);
+      if (!map.hasOwnProperty(k)) {
+        order.push(k);
+        map[k] = r.slice(0, RESUMEN_HEADERS.length);
+      }
+      // Si ya existe la misma clave (duplicado en hoja), se ignora: no sumar otra vez.
     });
     applyDayRows_(map, order, bySub[iso] || [], -1);
     applyDayRows_(map, order, byAdd[iso] || [], 1);
     var out = [];
+    var seen = {};
     order.forEach(function (k) {
-      if (map[k]) out.push(map[k]);
+      if (!map[k] || seen[k]) return;
+      seen[k] = true;
+      out.push(map[k]);
     });
     writeDaySheet_(sh, out);
   });
@@ -762,6 +861,19 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
   var sh = ensureRespSheet_(ss);
   var map = {};
   var order = [];
+
+  function respKeyFromSheetRow_(fechaDisp, dni, nombre) {
+    var iso = toIsoFecha_(fechaDisp);
+    if (!iso) {
+      var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(fechaDisp || '').trim());
+      if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    }
+    var id = String(dni || '').replace(/\D/g, '').slice(0, 8);
+    var nom = String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!iso) return '';
+    return iso + '|' + (id.length === 8 ? id : nom);
+  }
+
   if (sh.getLastRow() > 1) {
     var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
     var old = sh.getRange(2, 1, sh.getLastRow(), have.length).getValues();
@@ -776,20 +888,16 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
       var fechaDisp = row[fi >= 0 ? fi : 0];
       var nombre = row[si >= 0 ? si : 1];
       var dni = row[di >= 0 ? di : 2];
-      var iso = toIsoFecha_(fechaDisp);
-      if (!iso) {
-        var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(fechaDisp || '').trim());
-        if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
-      }
-      var key = (iso || '') + '|' + (String(dni || '').replace(/\D/g, '').slice(0, 8).length === 8
-        ? String(dni || '').replace(/\D/g, '').slice(0, 8)
-        : String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase());
-      if (!key || key === '|') return;
+      var key = respKeyFromSheetRow_(fechaDisp, dni, nombre);
+      if (!key || key.charAt(key.length - 1) === '|') return;
+      // Duplicado en hoja: conservar solo la primera (no sumar otra vez).
+      if (map.hasOwnProperty(key)) return;
+      var iso = key.split('|')[0];
       var tc = String(row[ti >= 0 ? ti : 3] || '');
       map[key] = {
         iso: iso,
         fecha: fmtDate(iso) || String(fechaDisp || ''),
-        supervisor: String(nombre || '').trim() || String(dni || ''),
+        supervisor: String(nombre || '').replace(/\s+/g, ' ').trim() || String(dni || ''),
         dni: String(dni || '').replace(/\D/g, '').slice(0, 8),
         manana: /mañana/i.test(tc),
         tarde: /tarde/i.test(tc),
@@ -844,9 +952,11 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
   applyResp(sub, -1);
   applyResp(add, 1);
   var rows = [];
+  var seen = {};
   order.forEach(function (key) {
+    if (!map[key] || seen[key]) return;
+    seen[key] = true;
     var g = map[key];
-    if (!g) return;
     var turnoCampo = g.manana && g.tarde ? 'Mañana / Tarde' : g.tarde ? 'Tarde' : 'Mañana';
     var hora = g.tarde && g.horaTarde ? g.horaTarde : g.horaManana || g.horaTarde || '';
     rows.push([
@@ -979,31 +1089,23 @@ function writeResponsablesSheet_(sh, rows) {
   var wasEmpty = sh.getLastRow() === 0;
   var last = 1 + (rows ? rows.length : 0);
   var clearTo = Math.max(sh.getLastRow(), last);
-  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent();
+  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent().clearFormat();
   sh.getRange(1, 1, 1, cols).setValues([RESP_HEADERS]);
+  sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold').setHorizontalAlignment('center');
   if (rows && rows.length) {
     sh.getRange(2, 1, rows.length, cols).setValues(rows);
+    sh.getRange(2, 1, rows.length, cols)
+      .setFontWeight('normal')
+      .setBackground('#FFFFFF')
+      .setHorizontalAlignment('center');
+    sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0');
+    sh.getRange(2, 6, rows.length, 1).setNumberFormat('0.00');
   }
   if (wasEmpty) {
-    var all = sh.getRange(1, 1, Math.max(last, 1), cols);
-    all.setFontFamily('Calibri')
-      .setFontSize(10)
-      .setFontColor('#000000')
-      .setBackground('#FFFFFF')
-      .setHorizontalAlignment('center')
-      .setVerticalAlignment('middle')
-      .setBorder(true, true, true, true, true, true, '#B7B7B7', SpreadsheetApp.BorderStyle.SOLID);
     sh.setFrozenRows(1);
-    sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
     var widths = [92, 220, 100, 110, 70, 70, 86];
     widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
     sh.setTabColor('#F7941D');
-  } else {
-    sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
-  }
-  if (rows && rows.length) {
-    sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0');
-    sh.getRange(2, 6, rows.length, 1).setNumberFormat('0.00');
   }
 }
 
@@ -1051,6 +1153,7 @@ function rebuildResumen() {
   // El resumen solo crece con cada Enviar (suma en el mismo módulo).
   var ss = SpreadsheetApp.getActive();
   dropOldResumen_(ss);
+  dropReporteSheets_(ss);
   ensureRespSheet_(ss);
   ensureAcumuladoSheet_(ss);
 }
@@ -1103,7 +1206,7 @@ function styleResumen_(sh, lastData, totRow) {
   if (lastData > 1) sh.getRange(1, 1, lastData, cols).createFilter();
 }
 
-/* ─── Reporte por supervisor+fecha (formato exportación) + Acumulado ─── */
+/* ─── Acumulado (todos los supervisores, orden de envío) ─── */
 
 function placeAfterSheet_(ss, sh, afterName) {
   if (!ss || !sh) return;
@@ -1122,344 +1225,23 @@ function placeAfterResponsables_(ss, sh) {
   placeAfterSheet_(ss, sh, RESP);
 }
 
-function sanitizeSheetPart_(s, maxLen) {
-  var t = String(s || '')
-    .replace(/[\\\/\?\*\[\\:]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (maxLen && t.length > maxLen) t = t.slice(0, maxLen).trim();
-  return t || 'Supervisor';
-}
-
-function reporteSheetName_(iso, supervisor, dni) {
-  var fecha = sheetNameDia_(iso) || 'fecha';
-  var nom = sanitizeSheetPart_(supervisor || dni, 36);
-  var name = 'R ' + fecha + ' ' + nom;
-  if (name.length > 90) name = name.slice(0, 90).trim();
-  return name;
-}
-
-function reporteKeyFromRow_(row, headers) {
-  var iso = toIsoFecha_(cell_(row, headers, 'Fecha'));
-  var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
-  var nom = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
-  if (!iso) return '';
-  return iso + '|' + (dni.length === 8 ? dni : nom.toUpperCase());
-}
-
-function loteKeyFromRow_(row, headers) {
-  return String(cell_(row, headers, 'Lote') || '').trim() + '|' + turnoCampoOnly_(row, headers);
-}
-
 function areaFromLogRow_(row, headers) {
   var av = num(cell_(row, headers, 'Avance'));
   if (av > 0) return av;
   return num(cell_(row, headers, 'Area'));
 }
 
-function reporteDataRowFromLog_(row, headers) {
-  var area = areaFromLogRow_(row, headers);
-  var jConv = num(cell_(row, headers, 'Jarras Conv'));
-  var kgConv = num(cell_(row, headers, 'Kg Conv'));
-  var jChina = num(cell_(row, headers, 'Jarras China'));
-  var kgChina = num(cell_(row, headers, 'Kg China'));
-  var totJ = num(cell_(row, headers, 'Total Jarras'));
-  var totK = num(cell_(row, headers, 'Total Kg'));
-  if (!(totJ > 0)) totJ = jConv + jChina;
-  if (!(totK > 0)) totK = kgConv + kgChina;
-  var jornales = num(cell_(row, headers, 'Jornales'));
-  var kgHa = area > 0 ? Math.round(totK / area) : '';
-  var kgJn = jornales > 0 ? Math.round(totK / jornales) : '';
-  return {
-    key: loteKeyFromRow_(row, headers),
-    jornal: jornales > 0 ? jornales : '',
-    area: Math.round(area * 1000) / 1000,
-    lote: String(cell_(row, headers, 'Lote') || '').trim(),
-    turno: turnoLote_(cell_(row, headers, 'Turno')),
-    modulo: mdLabel_(cell_(row, headers, 'MD')),
-    jarrasConv: jConv,
-    kgConv: Math.round(kgConv * 10) / 10,
-    jarrasChina: jChina,
-    kgChina: Math.round(kgChina * 10) / 10,
-    totalJarras: Math.round(totJ),
-    totalKg: Math.round(totK * 10) / 10,
-    kgHa: kgHa,
-    kgJn: kgJn,
-    fundo: fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa')),
-    variedad: String(cell_(row, headers, 'Variedad') || '').trim(),
-    turnoCampo: turnoCampoOnly_(row, headers),
-    clientId: String(cell_(row, headers, 'ClientId') || '').trim()
-  };
-}
-
-function ensureReporteSheet_(ss, iso, supervisor, dni) {
-  var name = reporteSheetName_(iso, supervisor, dni);
-  var sh = ss.getSheetByName(name);
-  if (!sh) {
-    ensureAcumuladoSheet_(ss);
-    sh = ss.insertSheet(name);
-    placeAfterSheet_(ss, sh, ACUM);
-  }
-  return sh;
-}
-
-function readReporteLotes_(sh) {
-  var map = {};
-  var order = [];
-  if (!sh || sh.getLastRow() < 5) return { map: map, order: order };
-  var last = sh.getLastRow();
-  if (last < 6) return { map: map, order: order }; // solo cabecera + total vacío
-  // Filas de datos: 5 .. last-1 (última = TOTAL). Col 14 = Turno campo (interno).
-  var data = sh.getRange(5, 1, last - 1, 14).getValues();
-  var i;
-  for (i = 0; i < data.length; i++) {
-    var r = data[i];
-    if (String(r[0] || '').toUpperCase() === 'TOTAL') continue;
-    var lote = String(r[2] || '').trim();
-    if (!lote) continue;
-    var tc = /tarde/i.test(String(r[13] || '')) ? 'Tarde' : 'Mañana';
-    var key = lote + '|' + tc;
-    if (map[key]) continue;
-    map[key] = {
-      key: key,
-      jornal: r[0],
-      area: num(r[1]),
-      lote: lote,
-      turno: String(r[3] || '').trim(),
-      modulo: String(r[4] || '').trim(),
-      jarrasConv: num(r[5]),
-      kgConv: num(r[6]),
-      jarrasChina: num(r[7]),
-      kgChina: num(r[8]),
-      totalJarras: num(r[9]),
-      totalKg: num(r[10]),
-      kgHa: r[11],
-      kgJn: r[12],
-      turnoCampo: tc
-    };
-    order.push(key);
-  }
-  return { map: map, order: order };
-}
-
-function writeReporteSheet_(sh, meta, rows) {
-  var NAVY = '#0B3A66';
-  var PEACH = '#F6D0B0';
-  var BROWN = '#C47848';
-  var LGREEN = '#C8E6A0';
-  var LBLUE = '#B7D4F5';
-  var WHITE = '#FFFFFF';
-  var cols = 14;
-  var n = rows && rows.length ? rows.length : 0;
-  var totRow = 5 + n;
-  var clearTo = Math.max(sh.getLastRow(), totRow);
-  if (clearTo > 0) sh.getRange(1, 1, clearTo, cols).clearContent().clearFormat();
-
-  sh.getRange(1, 1, 1, 13).merge().setValue(
-    'REPORTE DIARIO DE COSECHA EXPORTACIÓN - Q BERRIES ' + YEAR_REPORTE
-  );
-  sh.getRange(1, 1)
-    .setBackground(NAVY)
-    .setFontColor(WHITE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center')
-    .setVerticalAlignment('middle');
-  sh.setRowHeight(1, 28);
-
-  sh.getRange(2, 1).setValue('SUPERVISOR');
-  sh.getRange(2, 2, 1, 4).merge().setValue(meta.supervisor || '');
-  sh.getRange(2, 6).setValue('SEMANA');
-  sh.getRange(2, 7).setValue(meta.semana || '');
-  sh.getRange(2, 9).setValue('FECHA');
-  sh.getRange(2, 10, 1, 2).merge().setValue(meta.fecha || '');
-  sh.getRange(2, 1, 1, 13)
-    .setBackground('#1F6B3A')
-    .setFontColor(WHITE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center');
-  sh.getRange(2, 7).setBackground('#F4B183');
-  sh.getRange(2, 10).setBackground('#FFE699').setFontColor('#C00000');
-
-  sh.getRange(3, 1, 1, 5).merge().setValue('');
-  sh.getRange(3, 6, 1, 2).merge().setValue('CONVENCIONAL');
-  sh.getRange(3, 8, 1, 2).merge().setValue('CHINA');
-  sh.getRange(3, 10, 1, 2).merge().setValue('TOTAL');
-  sh.getRange(3, 1, 1, 5).setBackground(NAVY).setFontColor(WHITE);
-  sh.getRange(3, 6, 1, 2).setBackground(PEACH).setFontWeight('bold').setHorizontalAlignment('center');
-  sh.getRange(3, 8, 1, 2).setBackground(LGREEN).setFontWeight('bold').setHorizontalAlignment('center');
-  sh.getRange(3, 10, 1, 2).setBackground(LBLUE).setFontWeight('bold').setHorizontalAlignment('center');
-  sh.getRange(3, 12, 1, 2).setBackground(NAVY);
-
-  var heads = ['JORNAL', 'AREA', 'LOTE', 'TURNO', 'MODULO', 'JARRAS', 'KG', 'JARRAS', 'KG', 'JARRAS', 'KG', 'KG/HA', 'KG/JN', 'TC'];
-  sh.getRange(4, 1, 1, cols).setValues([heads]);
-  sh.getRange(4, 1, 1, 5).setBackground(NAVY).setFontColor(WHITE).setFontWeight('bold');
-  sh.getRange(4, 6).setBackground(PEACH).setFontWeight('bold');
-  sh.getRange(4, 7).setBackground(BROWN).setFontColor(WHITE).setFontWeight('bold');
-  sh.getRange(4, 8, 1, 2).setBackground(LGREEN).setFontWeight('bold');
-  sh.getRange(4, 10, 1, 2).setBackground(LBLUE).setFontWeight('bold');
-  sh.getRange(4, 12, 1, 2).setBackground(NAVY).setFontColor(WHITE).setFontWeight('bold');
-  sh.getRange(4, 14).setBackground('#EEEEEE').setFontColor('#888888');
-  sh.getRange(4, 1, 1, cols).setHorizontalAlignment('center');
-
-  if (n) {
-    var body = rows.map(function (r) {
-      return [
-        r.jornal === '' || r.jornal == null ? '' : r.jornal,
-        r.area,
-        r.lote,
-        r.turno,
-        r.modulo,
-        r.jarrasConv,
-        r.kgConv,
-        r.jarrasChina,
-        r.kgChina,
-        r.totalJarras,
-        r.totalKg,
-        r.kgHa,
-        r.kgJn,
-        r.turnoCampo || 'Mañana'
-      ];
-    });
-    sh.getRange(5, 1, n, cols).setValues(body);
-    sh.getRange(5, 1, n, 13)
-      .setBackground(PEACH)
-      .setHorizontalAlignment('center')
-      .setBorder(true, true, true, true, true, true, '#8FA3B5', SpreadsheetApp.BorderStyle.SOLID);
-    sh.getRange(5, 2, n, 1).setNumberFormat('0.00');
-    sh.getRange(5, 6, n, 1).setNumberFormat('#,##0');
-    sh.getRange(5, 7, n, 1).setNumberFormat('0.0');
-    sh.getRange(5, 8, n, 1).setNumberFormat('#,##0');
-    sh.getRange(5, 9, n, 1).setNumberFormat('0.0');
-    sh.getRange(5, 10, n, 1).setNumberFormat('#,##0');
-    sh.getRange(5, 11, n, 1).setNumberFormat('0.0');
-  }
-
-  var sumArea = 0, sumJC = 0, sumKC = 0, sumJH = 0, sumKH = 0, sumTJ = 0, sumTK = 0, sumJn = 0;
-  (rows || []).forEach(function (r) {
-    sumArea += num(r.area);
-    sumJC += num(r.jarrasConv);
-    sumKC += num(r.kgConv);
-    sumJH += num(r.jarrasChina);
-    sumKH += num(r.kgChina);
-    sumTJ += num(r.totalJarras);
-    sumTK += num(r.totalKg);
-    sumJn = Math.max(sumJn, num(r.jornal));
-  });
-  var totKgHa = sumArea > 0 ? Math.round(sumTK / sumArea) : '';
-  var totKgJn = sumJn > 0 ? Math.round(sumTK / sumJn) : '';
-  sh.getRange(totRow, 1, 1, cols).setValues([[
-    'TOTAL', Math.round(sumArea * 1000) / 1000, '', '', '',
-    sumJC, Math.round(sumKC * 10) / 10, sumJH, Math.round(sumKH * 10) / 10,
-    sumTJ, Math.round(sumTK * 10) / 10, totKgHa, totKgJn, ''
-  ]]);
-  sh.getRange(totRow, 1, 1, 13)
-    .setBackground(NAVY)
-    .setFontColor(WHITE)
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center');
-
-  var widths = [70, 70, 70, 60, 70, 70, 70, 70, 70, 70, 70, 70, 70, 1];
-  widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
-  try { sh.hideColumns(14); } catch (eHide) {}
-  sh.setTabColor('#0B3A66');
-  sh.setFrozenRows(4);
-}
-
-function applyReporteDelta_(map, order, item, sign) {
-  if (!item || !item.lote) return;
-  var key = String(item.lote) + '|' + (item.turnoCampo === 'Tarde' ? 'Tarde' : 'Mañana');
-  if (!map[key]) {
-    if (sign < 0) return;
-    map[key] = {
-      key: key,
-      jornal: item.jornal,
-      area: 0,
-      lote: item.lote,
-      turno: item.turno,
-      modulo: item.modulo,
-      jarrasConv: 0,
-      kgConv: 0,
-      jarrasChina: 0,
-      kgChina: 0,
-      totalJarras: 0,
-      totalKg: 0,
-      kgHa: '',
-      kgJn: '',
-      turnoCampo: item.turnoCampo === 'Tarde' ? 'Tarde' : 'Mañana'
-    };
-    order.push(key);
-  }
-  var cur = map[key];
-  if (sign > 0) {
-    if (item.turno) cur.turno = item.turno;
-    if (item.modulo) cur.modulo = item.modulo;
-    if (item.jornal !== '' && item.jornal != null) cur.jornal = item.jornal;
-    cur.turnoCampo = item.turnoCampo === 'Tarde' ? 'Tarde' : 'Mañana';
-  }
-  cur.area = Math.round((num(cur.area) + sign * num(item.area)) * 1000) / 1000;
-  cur.jarrasConv = num(cur.jarrasConv) + sign * num(item.jarrasConv);
-  cur.kgConv = Math.round((num(cur.kgConv) + sign * num(item.kgConv)) * 10) / 10;
-  cur.jarrasChina = num(cur.jarrasChina) + sign * num(item.jarrasChina);
-  cur.kgChina = Math.round((num(cur.kgChina) + sign * num(item.kgChina)) * 10) / 10;
-  cur.totalJarras = num(cur.totalJarras) + sign * num(item.totalJarras);
-  cur.totalKg = Math.round((num(cur.totalKg) + sign * num(item.totalKg)) * 10) / 10;
-  cur.kgHa = num(cur.area) > 0 ? Math.round(num(cur.totalKg) / num(cur.area)) : '';
-  cur.kgJn = num(cur.jornal) > 0 ? Math.round(num(cur.totalKg) / num(cur.jornal)) : '';
-  if (num(cur.totalJarras) <= 0 && num(cur.totalKg) <= 0 && Math.abs(num(cur.area)) < 0.0005) {
-    delete map[key];
-  }
-}
-
-function mergeReportesFromDeltas_(ss, headers, deltas) {
-  var groups = {};
-  (deltas || []).forEach(function (d) {
-    ['old', 'neu'].forEach(function (side) {
-      var row = d[side];
-      if (!row) return;
-      var rk = reporteKeyFromRow_(row, headers);
-      if (!rk) return;
-      if (!groups[rk]) {
-        groups[rk] = {
-          iso: toIsoFecha_(cell_(row, headers, 'Fecha')),
-          supervisor: String(cell_(row, headers, 'Supervisor') || '').trim(),
-          dni: String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8),
-          oldItems: [],
-          newItems: []
-        };
-      }
-      var g = groups[rk];
-      var nom = String(cell_(row, headers, 'Supervisor') || '').trim();
-      if (nom) g.supervisor = nom;
-      var item = reporteDataRowFromLog_(row, headers);
-      if (side === 'old') g.oldItems.push(item);
-      else g.newItems.push(item);
-    });
-  });
-
-  Object.keys(groups).forEach(function (rk) {
-    var g = groups[rk];
-    if (!g.iso) return;
-    var sh = ensureReporteSheet_(ss, g.iso, g.supervisor, g.dni);
-    var cur = readReporteLotes_(sh);
-    var map = cur.map;
-    var order = cur.order;
-    g.oldItems.forEach(function (it) { applyReporteDelta_(map, order, it, -1); });
-    g.newItems.forEach(function (it) { applyReporteDelta_(map, order, it, 1); });
-    var rows = [];
-    order.forEach(function (k) {
-      if (map[k]) rows.push(map[k]);
-    });
-    rows.sort(function (a, b) {
-      return String(a.lote).localeCompare(String(b.lote), 'es', { numeric: true });
-    });
-    writeReporteSheet_(sh, {
-      supervisor: g.supervisor || g.dni,
-      fecha: fmtDate(g.iso),
-      semana: isoWeek(g.iso)
-    }, rows);
+/** Borra hojas viejas tipo 'R 24-09-2026 NOMBRE' (ya no se usan). */
+function dropReporteSheets_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  ss.getSheets().slice().forEach(function (s) {
+    if (ss.getSheets().length <= 1) return;
+    var name = String(s.getName() || '').trim();
+    if (/^R \d{2}-\d{2}-\d{4}\b/.test(name)) {
+      try { ss.deleteSheet(s); } catch (e) {}
+    }
   });
 }
-
 function ensureAcumuladoSheet_(ss) {
   ss = ss || SpreadsheetApp.getActive();
   var sh = ss.getSheetByName(ACUM);
@@ -1523,22 +1305,34 @@ function acumuladoRowFromLog_(row, headers) {
     jornales > 0 ? jornales : '',
     area > 0 ? Math.round(totK / area) : '',
     jornales > 0 ? Math.round(totK / jornales) : '',
-    String(cell_(row, headers, 'ClientId') || '').trim(),
     horaCorta_(cell_(row, headers, 'Hora registro') || cell_(row, headers, 'Hora envío'))
   ];
 }
 
+function acumuladoKeyFromValues_(values) {
+  if (!values || !values.length) return '';
+  var iso = toIsoFecha_(values[0]);
+  if (!iso) {
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(values[0] || '').trim());
+    if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  }
+  var dni = String(values[3] || '').replace(/\D/g, '').slice(0, 8);
+  var lote = String(values[8] || '').trim();
+  var tc = /tarde/i.test(String(values[4] || '')) ? 'Tarde' : 'Mañana';
+  if (!iso || !lote || !dni) return '';
+  return iso + '|' + lote + '|' + tc + '|' + dni;
+}
+
 function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
   var sh = ensureAcumuladoSheet_(ss);
-  var idCol = ACUM_HEADERS.indexOf('ClientId');
-  var byId = {};
+  var byKey = {};
   var last = sh.getLastRow();
-  if (last > 1 && idCol >= 0) {
-    var ids = sh.getRange(2, idCol + 1, last, 1).getValues();
+  if (last > 1) {
+    var data = sh.getRange(2, 1, last, ACUM_HEADERS.length).getValues();
     var i;
-    for (i = 0; i < ids.length; i++) {
-      var cid = String(ids[i][0] || '').trim();
-      if (cid) byId[cid] = i + 2;
+    for (i = 0; i < data.length; i++) {
+      var k = acumuladoKeyFromValues_(data[i]);
+      if (k) byKey[k] = i + 2;
     }
   }
 
@@ -1548,15 +1342,15 @@ function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
   (deltas || []).forEach(function (d) {
     var neu = d.neu;
     if (!neu) return;
-    var cid = String(cell_(neu, headers, 'ClientId') || '').trim();
-    if (!cid || seen[cid]) return;
-    seen[cid] = true;
+    var key = fallbackKeyFromRow_(neu, headers);
+    if (!key || seen[key]) return;
+    seen[key] = true;
     var values = acumuladoRowFromLog_(neu, headers);
-    if (byId.hasOwnProperty(cid)) {
-      updates.push({ row: byId[cid], values: values });
+    if (byKey.hasOwnProperty(key)) {
+      updates.push({ row: byKey[key], values: values });
     } else {
       appends.push(values);
-      byId[cid] = -1;
+      byKey[key] = -1;
     }
   });
 

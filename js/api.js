@@ -228,6 +228,36 @@ APP.API = (() => {
     writeOutbox({ fecha: todayKey(), items: [] }, true);
   }
 
+  /** Quita del outbox los clientIds ya confirmados → el chip de pend. baja al instante. */
+  function ackOutboxIds(clientIds) {
+    const set = new Set((clientIds || []).map((id) => String(id || "").trim()).filter(Boolean));
+    if (!set.size) return;
+    const box = readOutbox();
+    let changed = false;
+    const next = [];
+    box.items.forEach((item) => {
+      if (!item) return;
+      const ids = Array.isArray(item.clientIds) ? item.clientIds : [];
+      if (!ids.length) {
+        next.push(item);
+        return;
+      }
+      const left = ids.filter((id) => !set.has(String(id)));
+      if (left.length === ids.length) {
+        next.push(item);
+        return;
+      }
+      changed = true;
+      if (!left.length) return; // reporte completo → sale del outbox
+      next.push({
+        ...item,
+        clientIds: left,
+        lotes: left.length,
+      });
+    });
+    if (changed) writeOutbox({ fecha: box.fecha || todayKey(), items: next }, true);
+  }
+
   function todayRecords(supervisorDni) {
     const day = todayKey();
     return healSending(all()).filter(
@@ -432,14 +462,12 @@ APP.API = (() => {
     try {
       json = JSON.parse(text);
     } catch (_) {}
-    if (!json || !json.ok) throw new Error("bad-response");
+    if (!json || json.ok !== true) throw new Error("bad-response");
+    // ok:true del servidor = lote guardado → confirmar siempre (aunque no liste IDs).
     const okIds = new Set([].concat(json.accepted || [], json.existing || []));
-    // Si el servidor guardó (ok:true) pero no listó IDs, confirmar el lote enviado.
-    if (!okIds.size) {
-      batch.forEach((r) => {
-        if (r && r.clientId) okIds.add(r.clientId);
-      });
-    }
+    batch.forEach((r) => {
+      if (r && r.clientId) okIds.add(r.clientId);
+    });
     return okIds;
   }
 
@@ -470,17 +498,30 @@ APP.API = (() => {
       if (onProgress) onProgress({ sent, left: leftNow, total: sent + leftNow, reports: pendingCount() });
       try {
         const last = queue.length <= batch.length;
-        const okIds = await sendBatch(batch, last, {
+        // rebuild lo hace el servidor en cola; aquí pedimos ok rápido.
+        const okIds = await sendBatch(batch, false, {
           summary,
           turnoCampo,
-          report: { summary, turnoCampo, lotes: queue.length },
+          report: { summary, turnoCampo, lotes: queue.length, final: last },
         });
         const confirmedAt = new Date().toISOString();
         const ok = batch.filter((r) => okIds.has(r.clientId)).map((r) => r.clientId);
         const fail = batch.filter((r) => !okIds.has(r.clientId));
         if (ok.length) {
           patchMany(ok, { syncStatus: "confirmed", uploaded: true, syncedAt: confirmedAt }, true);
+          ackOutboxIds(ok);
           sent += ok.length;
+          window.dispatchEvent(new Event("app:activity"));
+          const leftAfter = pendingOf().length;
+          if (onProgress) {
+            onProgress({
+              sent,
+              left: leftAfter,
+              total: sent + leftAfter,
+              reports: pendingCount(),
+              confirmed: ok.length,
+            });
+          }
         }
         if (fail.length) {
           write(
@@ -817,6 +858,7 @@ APP.API = (() => {
     queueReport,
     clearOutboxReport,
     clearOutboxAll,
+    ackOutboxIds,
     todayCount,
     wasMorningSent,
     sendCount,
