@@ -323,6 +323,21 @@ APP.App = (() => {
   function paintTotals() {
     const d = APP.Data.derive(currentData());
     $("#live-totals").innerHTML = `<span>${d.totalJarras} jarras</span><span>${d.totalKg} kg</span>`;
+    paintSaveBtn();
+  }
+
+  function hasJarrasInput() {
+    const conv = state.conv ? Number(String(state.jarrasConv || "").replace(/\D/g, "")) || 0 : 0;
+    const china = state.china ? Number(String(state.jarrasChina || "").replace(/\D/g, "")) || 0 : 0;
+    return conv > 0 || china > 0;
+  }
+
+  function paintSaveBtn() {
+    const btn = $("#btn-save");
+    if (!btn) return;
+    const on = hasJarrasInput();
+    btn.disabled = !on;
+    btn.setAttribute("aria-disabled", on ? "false" : "true");
   }
 
   function paintChecks() {
@@ -461,6 +476,7 @@ APP.App = (() => {
     paintLote();
     paintChecks();
     paintAvanceHint();
+    paintSaveBtn();
   }
 
   function emptyWorkspace() {
@@ -688,11 +704,25 @@ APP.App = (() => {
     on("#inp-avance", "input", () => applyAvance($("#inp-avance")?.value));
     on("#inp-avance", "blur", () => applyAvance($("#inp-avance")?.value, true));
     on("#inp-jconv", "input", () => {
-      state.jarrasConv = String($("#inp-jconv")?.value || "").replace(/\D/g, "");
+      const el = $("#inp-jconv");
+      state.jarrasConv = String(el?.value || "").replace(/\D/g, "");
+      if (el && el.value !== state.jarrasConv) el.value = state.jarrasConv;
+      if (state.jarrasConv && !state.conv) {
+        state.conv = true;
+        paintChecks();
+        return;
+      }
       paintTotals();
     });
     on("#inp-jchina", "input", () => {
-      state.jarrasChina = String($("#inp-jchina")?.value || "").replace(/\D/g, "");
+      const el = $("#inp-jchina");
+      state.jarrasChina = String(el?.value || "").replace(/\D/g, "");
+      if (el && el.value !== state.jarrasChina) el.value = state.jarrasChina;
+      if (state.jarrasChina && !state.china) {
+        state.china = true;
+        paintChecks();
+        return;
+      }
       paintTotals();
     });
     on("#chk-conv", "change", () => {
@@ -1099,30 +1129,31 @@ APP.App = (() => {
     return `El lote ${draft.lote} tiene cambios sin Guardar. El envío usa lo guardado, no lo de la pantalla.`;
   }
 
-  async function transferMode() {
+  async function transferMode(opts) {
+    const auto = !!(opts && opts.auto);
     if (state.transferring) return;
     state.transferring = true;
     closeSync();
     try {
       const warn = unsavedDraftWarning();
       if (warn) {
-        await feedback("Guarda antes de enviar", warn);
+        if (!auto) await feedback("Guarda antes de enviar", warn);
         return;
       }
       const dni = String(state.session.supervisorDni || "").trim();
       if (!dni) {
-        await feedback("Falta el supervisor", "Selecciona el supervisor para enviar.");
+        if (!auto) await feedback("Falta el supervisor", "Selecciona el supervisor para enviar.");
         return;
       }
       const sent = APP.API.sendCount(dni);
       if (sent >= 2) {
-        await feedback("Ya enviaste 2 veces", "Hoy ya se envió mañana y tarde con este supervisor.");
+        if (!auto) await feedback("Ya enviaste 2 veces", "Hoy ya se envió mañana y tarde con este supervisor.");
         return;
       }
       const isSecond = sent >= 1;
       const todayN = APP.API.todayCount();
       if (!todayN) {
-        await feedback("Sin lotes", "Primero guarda los lotes del día.");
+        if (!auto) await feedback("Sin lotes", "Primero guarda los lotes del día.");
         return;
       }
       const turnoEnvio = isSecond ? "Tarde" : "Mañana";
@@ -1132,22 +1163,24 @@ APP.App = (() => {
       if (isSecond) APP.API.queueTodayForResend();
       const queue = APP.API.pendingRecords().filter((r) => String(r.fecha) === today());
       if (!queue.length) {
-        await feedback("Ya está enviado", "No hay nada nuevo por enviar.");
+        if (!auto) await feedback("Ya está enviado", "No hay nada nuevo por enviar.");
         return;
       }
       const totalTxt = sendTotalsLabel(queue);
-      const ok = isSecond
-        ? await ask(
-            "Enviar turno tarde",
-            `Se enviará el reporte de tarde: ${totalTxt}. Al terminar se limpia el día en el celular. ¿Continuar?`,
-            "Enviar"
-          )
-        : await ask(
-            "Enviar turno mañana",
-            `Se enviará el reporte de mañana: ${totalTxt}. ¿Continuar?`,
-            "Enviar"
-          );
-      if (!ok) return;
+      if (!auto) {
+        const ok = isSecond
+          ? await ask(
+              "Enviar turno tarde",
+              `Se enviará el reporte de tarde: ${totalTxt}. Al terminar se limpia el día en el celular. ¿Continuar?`,
+              "Enviar"
+            )
+          : await ask(
+              "Enviar turno mañana",
+              `Se enviará el reporte de mañana: ${totalTxt}. ¿Continuar?`,
+              "Enviar"
+            );
+        if (!ok) return;
+      }
 
       APP.API.queueReport({
         turnoCampo: turnoEnvio,
@@ -1170,17 +1203,21 @@ APP.App = (() => {
       hideLoader();
 
       if (result.reason === "no-ep" || result.reason === "offline" || result.reason === "net" || result.reason === "http") {
-        await feedback(
-          "Sin señal",
-          `El reporte quedó pendiente (${totalTxt}). Puedes seguir trabajando. Cuando haya red, pulsa Enviar otra vez.`
-        );
+        if (!auto) {
+          await feedback(
+            "Sin señal",
+            `El reporte quedó pendiente (${totalTxt}). Puedes seguir trabajando. Cuando haya red, pulsa Enviar otra vez.`
+          );
+        }
         return;
       }
       if (result.left > 0) {
-        await feedback(
-          "No terminó el envío",
-          `Parte del reporte quedó pendiente. Tus datos siguen en el celular. Pulsa Enviar otra vez.`
-        );
+        if (!auto) {
+          await feedback(
+            "No terminó el envío",
+            `Parte del reporte quedó pendiente. Tus datos siguen en el celular. Pulsa Enviar otra vez.`
+          );
+        }
         return;
       }
 
@@ -1199,26 +1236,75 @@ APP.App = (() => {
         APP.API.markTransferred();
         const wiped = APP.API.clearTodayRecords();
         if (!wiped || !wiped.ok) {
-          await feedback("Revisa el envío", "Algo quedó sin confirmar. No se borró el día. Pulsa Enviar otra vez.");
+          if (!auto) await feedback("Revisa el envío", "Algo quedó sin confirmar. No se borró el día. Pulsa Enviar otra vez.");
           return;
         }
         APP.API.clearOutboxAll();
         emptyWorkspace();
         paintHistorial();
         paintStatus();
-        await feedback("Tarde enviada", `Listo: ${totalTxt}. El día se limpió. Los Excel quedan en Historial.`);
+        await feedback("Tarde enviada", `Listo: ${totalTxt}. El día se limpió. Los Excel quedan en Historial.`, auto ? { ms: 2200 } : undefined);
         return;
       }
 
       rememberExcel(null, "Mañana");
       paintHistorial();
       paintStatus();
-      await feedback("Mañana enviada", `Listo: ${totalTxt}. El turno pasó a Tarde.`);
+      await feedback("Mañana enviada", `Listo: ${totalTxt}. El turno pasó a Tarde.`, auto ? { ms: 2200 } : undefined);
     } catch (e) {
       hideLoader();
-      await feedback("No se pudo enviar", "Tus lotes siguen en el celular. Si quedó 1 pendiente, reintenta con señal.");
+      if (!auto) {
+        await feedback("No se pudo enviar", "Tus lotes siguen en el celular. Si quedó 1 pendiente, reintenta con señal.");
+      }
     } finally {
       state.transferring = false;
+    }
+  }
+
+  let autoSyncTimer = 0;
+  let autoSyncBusy = false;
+
+  function hasInterruptedSend() {
+    try {
+      return APP.API.pendingCount() > 0 && APP.API.lotPendingCount() > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function scheduleAutoSync(delayMs) {
+    if (autoSyncTimer) clearTimeout(autoSyncTimer);
+    autoSyncTimer = setTimeout(() => {
+      autoSyncTimer = 0;
+      tryAutoSync();
+    }, Math.max(0, delayMs == null ? 2800 : delayMs));
+  }
+
+  async function tryAutoSync() {
+    if (autoSyncBusy || state.transferring) {
+      if (hasInterruptedSend()) scheduleAutoSync(10000);
+      return;
+    }
+    if (!hasInterruptedSend()) return;
+    if (unsavedDraftWarning()) return;
+    const dni = String(state.session.supervisorDni || "").trim();
+    if (!dni) return;
+    if (APP.API.sendCount(dni) >= 2) return;
+
+    autoSyncBusy = true;
+    try {
+      const live = await APP.API.probe();
+      if (!live || !live.ok) {
+        if (hasInterruptedSend()) scheduleAutoSync(60000);
+        return;
+      }
+      await transferMode({ auto: true });
+      if (hasInterruptedSend()) scheduleAutoSync(60000);
+    } catch (_) {
+      if (hasInterruptedSend()) scheduleAutoSync(60000);
+    } finally {
+      autoSyncBusy = false;
+      paintStatus();
     }
   }
 
@@ -1269,6 +1355,127 @@ APP.App = (() => {
     });
   }
 
+  let deferredInstall = null;
+  const INSTALL_DISMISS_KEY = "qb_install_dismiss_until";
+
+  function isAppInstalled() {
+    try {
+      if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true;
+      if (window.matchMedia && window.matchMedia("(display-mode: fullscreen)").matches) return true;
+      if (navigator.standalone === true) return true;
+      const q = new URLSearchParams(location.search || "");
+      if (q.get("source") === "pwa") return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function isIosBrowser() {
+    const ua = navigator.userAgent || "";
+    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function installDismissed() {
+    try {
+      return Number(localStorage.getItem(INSTALL_DISMISS_KEY) || 0) > Date.now();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function dismissInstall(days) {
+    try {
+      localStorage.setItem(INSTALL_DISMISS_KEY, String(Date.now() + (days == null ? 3 : days) * 86400000));
+    } catch (_) {}
+    hideInstall();
+  }
+
+  function hideInstall() {
+    const root = $("#qb-install");
+    if (root) root.hidden = true;
+  }
+
+  function showInstall() {
+    if (isAppInstalled() || installDismissed()) return;
+    const root = $("#qb-install");
+    if (!root) return;
+    const ios = isIosBrowser();
+    const iosHint = $("#install-ios-hint");
+    const lead = $("#install-lead");
+    const btnNow = $("#btn-install-now");
+    const btnLater = $("#btn-install-later");
+    const title = $("#install-title");
+
+    if (ios) {
+      if (title) title.textContent = "Cómo instalar en iPhone";
+      if (lead) lead.hidden = true;
+      if (iosHint) iosHint.hidden = false;
+      if (btnNow) btnNow.hidden = true;
+      if (btnLater) btnLater.textContent = "Entendido";
+    } else {
+      if (title) title.textContent = "Instala la app";
+      if (lead) {
+        lead.hidden = false;
+        lead.textContent = "Queda en tu celular como app. Si cierras Chrome o se apaga el teléfono, tus lotes siguen hasta que envíes el turno.";
+      }
+      if (iosHint) iosHint.hidden = true;
+      if (btnNow) {
+        btnNow.hidden = false;
+        btnNow.textContent = "Instalar";
+        btnNow.disabled = false;
+      }
+      if (btnLater) btnLater.textContent = "Ahora no";
+    }
+    root.hidden = false;
+  }
+
+  async function runInstall() {
+    if (isIosBrowser()) return;
+    if (deferredInstall) {
+      try {
+        deferredInstall.prompt();
+        const choice = await deferredInstall.userChoice;
+        deferredInstall = null;
+        if (choice && choice.outcome === "accepted") {
+          hideInstall();
+          try {
+            localStorage.removeItem(INSTALL_DISMISS_KEY);
+          } catch (_) {}
+          return;
+        }
+      } catch (_) {}
+    }
+    await feedback("Instalar app", "En Chrome: menú ⋮ → Instalar app o Agregar a pantalla de inicio.");
+  }
+
+  function setupInstallPrompt() {
+    if (isAppInstalled()) return;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredInstall = e;
+      if (!installDismissed()) showInstall();
+    });
+    window.addEventListener("appinstalled", () => {
+      deferredInstall = null;
+      hideInstall();
+      try {
+        localStorage.removeItem(INSTALL_DISMISS_KEY);
+      } catch (_) {}
+    });
+    const btnNow = $("#btn-install-now");
+    const btnLater = $("#btn-install-later");
+    const root = $("#qb-install");
+    if (btnNow) btnNow.onclick = () => { runInstall(); };
+    if (btnLater) btnLater.onclick = () => dismissInstall(3);
+    if (root) {
+      root.addEventListener("click", (e) => {
+        if (e.target === root) dismissInstall(1);
+      });
+    }
+    setTimeout(() => {
+      if (!isAppInstalled() && !installDismissed()) showInstall();
+    }, 1200);
+  }
+
   function allowMobileOrTablet() {
     const host = location.hostname || "";
     if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
@@ -1312,7 +1519,9 @@ APP.App = (() => {
     paintChecks();
     paintDay();
     paintStatus();
+    paintSaveBtn();
     bind();
+    setupInstallPrompt();
     const refreshDay = () => {
       APP.API.pruneOldRecords();
       paintDay();
@@ -1320,10 +1529,20 @@ APP.App = (() => {
       paintHistorial();
     };
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) refreshDay();
+      if (!document.hidden) {
+        refreshDay();
+        if (hasInterruptedSend()) scheduleAutoSync(2000);
+      }
     });
-    window.addEventListener("focus", refreshDay);
-    window.addEventListener("online", refreshDay);
+    window.addEventListener("focus", () => {
+      refreshDay();
+      if (hasInterruptedSend()) scheduleAutoSync(2000);
+    });
+    window.addEventListener("online", () => {
+      refreshDay();
+      if (hasInterruptedSend()) scheduleAutoSync(2800);
+    });
+    if (hasInterruptedSend()) scheduleAutoSync(1500);
     if (APP.Data && APP.Data.load) {
       APP.Data.load()
         .then(() => paintPeople())

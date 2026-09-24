@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.0.73" />
-  <link rel="stylesheet" href="css/styles.css?v=2.0.73" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.0.80" />
+  <link rel="stylesheet" href="css/styles.css?v=2.0.80" />
   <script>
     (function () {
       function isLocalHost() {
@@ -154,7 +154,7 @@
           <span>0 jarras</span>
           <span>0 kg</span>
         </div>
-        <button type="button" class="btn-main" id="btn-save">Guardar lote</button>
+        <button type="button" class="btn-main" id="btn-save" disabled aria-disabled="true">Guardar lote</button>
       </section>
 
       <section class="card">
@@ -195,6 +195,20 @@
         </span>
       </div>
       <p class="desktop-gate-hint">Abre el mismo enlace desde tu teléfono o tablet e instálala en la pantalla de inicio.</p>
+    </div>
+  </div>
+
+  <div class="qb-install" id="qb-install" hidden>
+    <div class="qb-install-sheet" role="dialog" aria-modal="true" aria-labelledby="install-title">
+      <img class="qb-install-logo" src="assets/icon-192.png" alt="" width="64" height="64" />
+      <p class="qb-install-kicker">Q BERRIES</p>
+      <h2 id="install-title">Instala la app</h2>
+      <p class="qb-install-lead" id="install-lead">Queda en tu celular como app. Si cierras Chrome o se apaga el teléfono, tus lotes siguen hasta que envíes el turno.</p>
+      <p class="qb-install-ios" id="install-ios-hint" hidden>
+        En iPhone: toca <b>Compartir</b> <span aria-hidden="true">□↑</span> y luego <b>Agregar a pantalla de inicio</b>.
+      </p>
+      <button type="button" class="qb-install-primary" id="btn-install-now">Instalar</button>
+      <button type="button" class="qb-install-ghost" id="btn-install-later">Ahora no</button>
     </div>
   </div>
 
@@ -252,7 +266,7 @@
         </div>
         <button type="button" class="qb-export-close" id="btn-sync-close" aria-label="Cerrar">×</button>
       </header>
-      <div class="sync-version">Versión <b id="sync-version">v2.0.73</b></div>
+      <div class="sync-version">Versión <b id="sync-version">v2.0.79</b></div>
       <button type="button" class="sync-action" id="btn-update">
         <strong>Actualizar app</strong>
         <small>Baja la última versión de la nube</small>
@@ -265,14 +279,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.0.73"></script>
-  <script src="js/catalog-lotes.js?v=2.0.73"></script>
-  <script src="js/catalog-supervisores.js?v=2.0.73"></script>
-  <script src="js/catalog-plano.js?v=2.0.73"></script>
-  <script src="js/data.js?v=2.0.73"></script>
-  <script src="js/select.js?v=2.0.73"></script>
-  <script src="js/api.js?v=2.0.73"></script>
-  <script src="js/excel.js?v=2.0.73"></script>
-  <script src="js/app.js?v=2.0.73"></script>
+  <script src="js/config.js?v=2.0.80"></script>
+  <script src="js/catalog-lotes.js?v=2.0.80"></script>
+  <script src="js/catalog-supervisores.js?v=2.0.80"></script>
+  <script src="js/catalog-plano.js?v=2.0.80"></script>
+  <script src="js/data.js?v=2.0.80"></script>
+  <script src="js/select.js?v=2.0.80"></script>
+  <script src="js/api.js?v=2.0.80"></script>
+  <script src="js/excel.js?v=2.0.80"></script>
+  <script src="js/app.js?v=2.0.80"></script>
 </body>
 </html>

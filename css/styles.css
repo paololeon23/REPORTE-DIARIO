@@ -125,12 +125,14 @@ body.is-desktop .desktop-gate {
 html.is-desktop .app,
 html.is-desktop .qb-loader,
 html.is-desktop .qb-fb,
+html.is-desktop .qb-install,
 html.is-desktop .qb-export,
 html.is-desktop .hist-view,
 html.is-desktop .qb-sync,
 body.is-desktop .app,
 body.is-desktop .qb-loader,
 body.is-desktop .qb-fb,
+body.is-desktop .qb-install,
 body.is-desktop .qb-export,
 body.is-desktop .hist-view,
 body.is-desktop .qb-sync {
@@ -617,6 +619,12 @@ body.is-desktop .qb-sync {
   background: var(--green-bright); color: #fff; font-weight: 800;
   letter-spacing: 0.02em;
 }
+.btn-main:disabled {
+  opacity: 0.42;
+  pointer-events: none;
+  background: #A8B5AB;
+  color: #F5F7F5;
+}
 .btn-ghost {
   height: 46px; border-radius: 14px;
   background: #fff; color: var(--qb-forest); font-weight: 800;
@@ -845,16 +853,92 @@ body.is-desktop .qb-sync {
   opacity: 0.45;
 }
 
-.qb-loader, .qb-fb {
+.qb-loader, .qb-fb, .qb-install {
   position: fixed; inset: 0; z-index: 70;
   background: rgba(8, 24, 40, 0.4);
   display: grid; place-items: center;
 }
-.qb-loader[hidden], .qb-fb[hidden] { display: none; }
+.qb-loader[hidden], .qb-fb[hidden], .qb-install[hidden] { display: none; }
 .qb-loader-card, .qb-fb-sheet {
   background: #fff; border-radius: 16px; padding: 18px; width: min(320px, 90vw);
   display: grid; gap: 8px; text-align: center;
 }
+
+.qb-install {
+  align-items: flex-end;
+  padding: 12px 12px calc(12px + var(--safe-bottom));
+  z-index: 75;
+}
+.qb-install-sheet {
+  width: min(420px, 100%);
+  background: #fff;
+  border-radius: 20px 20px 16px 16px;
+  padding: 22px 18px 16px;
+  display: grid;
+  gap: 10px;
+  text-align: center;
+  box-shadow: 0 -8px 28px rgba(8, 24, 40, 0.12);
+}
+.qb-install-logo {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+  border-radius: 14px;
+  object-fit: cover;
+}
+.qb-install-kicker {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: #F7941D;
+}
+.qb-install-sheet h2 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #1B5E20;
+}
+.qb-install-lead {
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--qb-muted);
+}
+.qb-install-primary {
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: #1B5E20;
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  font-size: 1rem;
+}
+.qb-install-ghost {
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: #E8EEE9;
+  color: #1B5E20;
+  font: inherit;
+  font-weight: 800;
+}
+.qb-install-ios {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #5A6B5E;
+  background: #F3F8F4;
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.qb-install-ios[hidden],
+.qb-install-primary[hidden],
+.qb-install-lead[hidden] {
+  display: none;
+}
+.qb-install-ios b { color: #1B5E20; }
 .qb-loader-card strong {
   font-size: 0.95rem;
   font-weight: 800;
