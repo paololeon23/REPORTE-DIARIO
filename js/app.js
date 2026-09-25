@@ -822,6 +822,7 @@ APP.App = (() => {
     click("#btn-hist-back", closeHistorial);
     click("#btn-sync", openSync);
     click("#btn-sync-close", closeSync);
+    click("#btn-wipe", () => wipeCache());
     on("#qb-sync", "click", (e) => {
       if (e.target === $("#qb-sync")) closeSync();
     });
@@ -1263,35 +1264,25 @@ APP.App = (() => {
         summary: totalTxt,
         records: queue,
       });
-      paintStatus();
 
-      // Sin internet: pendiente al toque, sin loader.
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         if (!auto) {
           await feedback(
-            "Quedó pendiente",
-            `${totalTxt}. Sigue trabajando. Cuando haya señal, pulsa Enviar otra vez.`,
-            { ms: 2400 }
+            "Sin señal",
+            "Quedó guardado en el celular. Se enviará solo cuando vuelva la red.",
+            { ms: 2200 }
           );
         }
         return;
       }
 
-      // Con red: enviar directo (sin ping previo que bloqueaba / duplicaba espera).
-      showLoader("Enviando", "Enviando reporte…");
       const result = await APP.API.flush({
         summary: totalTxt,
         turnoCampo: turnoEnvio,
         supervisorDni: dni,
-        onProgress: () => {
-          showLoader("Enviando", "Enviando reporte…");
-          paintStatus();
-        },
       });
       paintDay();
       paintHistorial();
-      paintStatus();
-      hideLoader();
 
       if (result.reason === "no-ep" || result.reason === "offline" || result.reason === "net" || result.reason === "http" || result.reason === "partial") {
         if (!auto) {
@@ -1448,13 +1439,8 @@ APP.App = (() => {
       const text = el.querySelector(".chip-text");
       if (text) text.textContent = on ? "En línea" : "Sin red";
     });
-    // 1 envío = 1 pendiente (no el número de lotes).
-    const n = APP.API.pendingCount();
-    document.querySelectorAll("#chip-pending-text, [data-chip-pending-text]").forEach((el) => {
-      el.textContent = n > 0 ? (n === 1 ? "1 pend." : n + " pend.") : "0 pend.";
-    });
     document.querySelectorAll("#chip-pending, [data-chip-pending]").forEach((el) => {
-      el.classList.toggle("has-items", n > 0);
+      el.hidden = true;
     });
   }
 

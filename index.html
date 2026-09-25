@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.0.99" />
-  <link rel="stylesheet" href="css/styles.css?v=2.0.99" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.00" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.00" />
   <script>
     (function () {
       function isLocalHost() {
@@ -63,7 +63,7 @@
           <span class="dot"></span>
           <span class="chip-text">En línea</span>
         </div>
-        <button type="button" class="status-chip pending" id="chip-pending" title="Pendientes">
+        <button type="button" class="status-chip pending" id="chip-pending" title="Pendientes" hidden>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <path d="M12 16V8M8 11l4-4 4 4"/>
             <path d="M5 18h14a2 2 0 0 0 2-2v-1a4 4 0 0 0-3.2-3.9A6 6 0 0 0 6.1 9.2 4 4 0 0 0 5 13v3a2 2 0 0 0 2 2z" opacity=".35"/>
@@ -177,6 +177,7 @@
         <div class="hoy-actions">
           <button type="button" class="hoy-btn" id="btn-historial">Historial</button>
           <button type="button" class="hoy-btn dark" id="btn-sync">Sync</button>
+          <button type="button" class="hoy-btn" id="btn-wipe">Eliminar caché</button>
         </div>
         <div class="day-kpis" id="day-kpis"></div>
         <div class="lot-list" id="lot-list"></div>
@@ -291,14 +292,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.0.99"></script>
-  <script src="js/catalog-lotes.js?v=2.0.99"></script>
-  <script src="js/catalog-supervisores.js?v=2.0.99"></script>
-  <script src="js/catalog-plano.js?v=2.0.99"></script>
-  <script src="js/data.js?v=2.0.99"></script>
-  <script src="js/select.js?v=2.0.99"></script>
-  <script src="js/api.js?v=2.0.99"></script>
-  <script src="js/excel.js?v=2.0.99"></script>
-  <script src="js/app.js?v=2.0.99"></script>
+  <script src="js/config.js?v=2.1.00"></script>
+  <script src="js/catalog-lotes.js?v=2.1.00"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.00"></script>
+  <script src="js/catalog-plano.js?v=2.1.00"></script>
+  <script src="js/data.js?v=2.1.00"></script>
+  <script src="js/select.js?v=2.1.00"></script>
+  <script src="js/api.js?v=2.1.00"></script>
+  <script src="js/excel.js?v=2.1.00"></script>
+  <script src="js/app.js?v=2.1.00"></script>
 </body>
 </html>

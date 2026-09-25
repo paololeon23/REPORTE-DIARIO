@@ -1323,6 +1323,9 @@ body.is-desktop .qb-sync {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+#btn-wipe {
+  grid-column: 1 / -1;
+}
 .hoy-btn {
   height: 44px;
   border-radius: 12px;
