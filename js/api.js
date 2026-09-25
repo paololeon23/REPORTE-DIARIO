@@ -217,11 +217,11 @@ APP.API = (() => {
     return item;
   }
 
-  function clearOutboxReport(turnoCampo) {
+  function clearOutboxReport(turnoCampo, silent) {
     const tc = turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     const box = readOutbox();
     box.items = box.items.filter((x) => (x.turnoCampo || "Mañana") !== tc);
-    writeOutbox(box, true);
+    writeOutbox(box, silent === true);
   }
 
   function clearOutboxAll() {
@@ -465,10 +465,15 @@ APP.API = (() => {
     let json = null;
     try {
       json = JSON.parse(text);
-    } catch (_) {}
-    if (!json || json.ok !== true) throw new Error("bad-response");
-    // ok:true = guardado. Confirmar TODO el lote del batch (un envío).
-    const okIds = new Set([].concat(json.accepted || [], json.existing || []));
+    } catch (_) {
+      const m = text && String(text).match(/\{[\s\S]*"ok"\s*:\s*true[\s\S]*\}/);
+      if (m) {
+        try { json = JSON.parse(m[0]); } catch (_2) {}
+      }
+    }
+    const saved = !!(json && json.ok === true) || /"ok"\s*:\s*true/.test(String(text || ""));
+    if (!saved) throw new Error("bad-response");
+    const okIds = new Set([].concat((json && json.accepted) || [], (json && json.existing) || []));
     batch.forEach((r) => {
       if (r && r.clientId) okIds.add(r.clientId);
     });
@@ -512,10 +517,11 @@ APP.API = (() => {
         const ok = batch.map((r) => r.clientId).filter(Boolean);
         if (ok.length) {
           patchMany(ok, { syncStatus: "confirmed", uploaded: true, syncedAt: confirmedAt }, true);
-          ackOutboxIds(ok);
-          clearOutboxReport(turnoCampo);
+          clearOutboxReport(turnoCampo, false);
           sent += ok.length;
           failures = 0;
+          const leftAfter = pendingOf().length;
+          if (onProgress) onProgress({ sent, left: leftAfter, reports: pendingCount() });
           window.dispatchEvent(new Event("app:activity"));
         }
       } catch (_) {
