@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.0.96" />
-  <link rel="stylesheet" href="css/styles.css?v=2.0.96" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.0.97" />
+  <link rel="stylesheet" href="css/styles.css?v=2.0.97" />
   <script>
     (function () {
       function isLocalHost() {
@@ -88,6 +88,18 @@
           <small>Escáner</small>
           <span id="lbl-scanner">Seleccionar…</span>
         </button>
+        <div class="field-num turno-campo" id="sel-fundo">
+          <small>Fundo</small>
+          <button type="button" class="turno-select-btn" id="btn-fundo" aria-haspopup="listbox" aria-expanded="false" aria-controls="menu-fundo">
+            <span id="lbl-fundo">Seleccionar…</span>
+          </button>
+          <div class="turno-select-menu" id="menu-fundo" role="listbox" hidden>
+            <button type="button" class="turno-select-opt" data-fundo="LICAPA I" role="option">LICAPA I</button>
+            <button type="button" class="turno-select-opt" data-fundo="LICAPA II" role="option">LICAPA II</button>
+            <button type="button" class="turno-select-opt" data-fundo="LICAPA III" role="option">LICAPA III</button>
+            <button type="button" class="turno-select-opt" data-fundo="LICAPA IV" role="option">LICAPA IV</button>
+          </div>
+        </div>
         <label class="field-num">
           <small>Jornales (personas)</small>
           <input id="inp-jornales" inputmode="numeric" value="" placeholder="0" />
@@ -279,14 +291,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.0.96"></script>
-  <script src="js/catalog-lotes.js?v=2.0.96"></script>
-  <script src="js/catalog-supervisores.js?v=2.0.96"></script>
-  <script src="js/catalog-plano.js?v=2.0.96"></script>
-  <script src="js/data.js?v=2.0.96"></script>
-  <script src="js/select.js?v=2.0.96"></script>
-  <script src="js/api.js?v=2.0.96"></script>
-  <script src="js/excel.js?v=2.0.96"></script>
-  <script src="js/app.js?v=2.0.96"></script>
+  <script src="js/config.js?v=2.0.97"></script>
+  <script src="js/catalog-lotes.js?v=2.0.97"></script>
+  <script src="js/catalog-supervisores.js?v=2.0.97"></script>
+  <script src="js/catalog-plano.js?v=2.0.97"></script>
+  <script src="js/data.js?v=2.0.97"></script>
+  <script src="js/select.js?v=2.0.97"></script>
+  <script src="js/api.js?v=2.0.97"></script>
+  <script src="js/excel.js?v=2.0.97"></script>
+  <script src="js/app.js?v=2.0.97"></script>
 </body>
 </html>

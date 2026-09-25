@@ -13,6 +13,7 @@ APP.App = (() => {
       jornales: 0,
       grupo: "",
       etapa: "",
+      fundo: "",
       turnoCampo: "Mañana",
     },
     lote: null,
@@ -31,6 +32,16 @@ APP.App = (() => {
 
   function supDni() {
     return String(state.session.supervisorDni || "").trim();
+  }
+
+  function fundoList() {
+    const list = APP.CONFIG && APP.CONFIG.FUNDOS;
+    return Array.isArray(list) && list.length ? list : ["LICAPA I", "LICAPA II", "LICAPA III", "LICAPA IV"];
+  }
+
+  function canonFundo(v) {
+    const s = String(v || "").trim().toUpperCase().replace(/\s+/g, " ");
+    return fundoList().find((f) => String(f).toUpperCase() === s) || "";
   }
 
   function dayRecords(fecha, turnoCampo) {
@@ -172,6 +183,15 @@ APP.App = (() => {
       scan.textContent = name || "Seleccionar…";
     }
     if (jn) jn.value = state.session.jornales > 0 ? String(state.session.jornales) : "";
+    const fundo = canonFundo(state.session.fundo);
+    if (fundo) state.session.fundo = fundo;
+    const lblFundo = $("#lbl-fundo");
+    if (lblFundo) lblFundo.textContent = fundo || "Seleccionar…";
+    document.querySelectorAll("#menu-fundo [data-fundo]").forEach((btn) => {
+      const on = btn.dataset.fundo === fundo;
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
     const envios = APP.API.sendCount(state.session.supervisorDni);
     if (!opts || !opts.keepTurno) syncTurnoCampo();
     const turno = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
@@ -309,7 +329,7 @@ APP.App = (() => {
     return {
       fecha: today(),
       lote: L.lote || "",
-      fundo: L.fundo || "",
+      fundo: canonFundo(state.session.fundo) || L.fundo || "",
       variedad: L.variedad || "",
       md: L.md || "",
       turno: L.turno || "",
@@ -513,6 +533,10 @@ APP.App = (() => {
     try {
       if (!String(state.session.supervisorDni || "").trim()) {
         await feedback("Falta el supervisor", "Selecciona el supervisor.");
+        return;
+      }
+      if (!canonFundo(state.session.fundo)) {
+        await feedback("Falta el fundo", "Selecciona LICAPA I, II, III o IV.");
         return;
       }
       if (!state.lote) {
@@ -719,6 +743,32 @@ APP.App = (() => {
       });
       document.addEventListener("click", (e) => {
         if (!$("#sel-turno-campo")?.contains(e.target)) closeTurno();
+      });
+    }
+    const fundoBtn = $("#btn-fundo");
+    const fundoMenu = $("#menu-fundo");
+    const closeFundo = () => {
+      if (!fundoMenu || !fundoBtn) return;
+      fundoMenu.hidden = true;
+      fundoBtn.setAttribute("aria-expanded", "false");
+    };
+    if (fundoBtn && fundoMenu) {
+      fundoBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = fundoMenu.hidden;
+        fundoMenu.hidden = !open;
+        fundoBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      fundoMenu.addEventListener("click", (e) => {
+        const opt = e.target.closest("[data-fundo]");
+        if (!opt) return;
+        state.session.fundo = canonFundo(opt.dataset.fundo);
+        persistSession();
+        paintPeople();
+        closeFundo();
+      });
+      document.addEventListener("click", (e) => {
+        if (!$("#sel-fundo")?.contains(e.target)) closeFundo();
       });
     }
     on("#inp-jornales", "input", () => {

@@ -595,9 +595,22 @@ function fmtDate(iso) {
   return m ? m[3] + '/' + m[2] + '/' + m[1] : '';
 }
 
+function canonFundo_(v) {
+  var s = String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (s === 'LICAPA I' || s === 'LICAPA 1') return 'LICAPA I';
+  if (s === 'LICAPA II' || s === 'LICAPA 2') return 'LICAPA II';
+  if (s === 'LICAPA III' || s === 'LICAPA 3') return 'LICAPA III';
+  if (s === 'LICAPA IV' || s === 'LICAPA 4') return 'LICAPA IV';
+  return '';
+}
+
 function fundoLabel(fundo, etapa) {
+  var picked = canonFundo_(fundo);
+  if (picked) return picked;
   var e = String(etapa || '').trim();
   var f = String(fundo || 'LICAPA').trim();
+  var fromEtapa = canonFundo_(e);
+  if (fromEtapa) return fromEtapa;
   if (/licapa/i.test(e)) return e;
   if (e) return f + ' ' + e;
   return f;
@@ -641,11 +654,25 @@ function sheetNameDia_(iso) {
   return fmtDate(iso).replace(/\//g, '-');
 }
 
-function daySheet_(ss, iso) {
-  var name = sheetNameDia_(iso);
-  if (!name) return null;
+function etapaSheetLabel_(fundo, etapa) {
+  var picked = canonFundo_(fundo) || canonFundo_(etapa);
+  if (picked === 'LICAPA I') return 'ETAPA I';
+  if (picked === 'LICAPA II') return 'ETAPA II';
+  if (picked === 'LICAPA III') return 'ETAPA III';
+  if (picked === 'LICAPA IV') return 'ETAPA IV';
+  var s = String(etapa || fundo || '').toUpperCase();
+  var m = /\b(IV|III|II|I)\b/.exec(s);
+  return m ? 'ETAPA ' + m[1] : 'ETAPA I';
+}
+
+function daySheet_(ss, iso, etapaLabel, create) {
+  var base = sheetNameDia_(iso);
+  if (!base) return null;
+  var tag = String(etapaLabel || '').trim() || 'ETAPA I';
+  var name = base + '-' + tag;
+  if (name.length > 99) name = name.slice(0, 99);
   var sh = ss.getSheetByName(name);
-  if (!sh) sh = ss.insertSheet(name);
+  if (!sh && create) sh = ss.insertSheet(name);
   return sh;
 }
 
@@ -736,7 +763,10 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
     var turno = turnoLote_(cell_(row, headers, 'Turno'));
     var variedad = String(cell_(row, headers, 'Variedad') || '').trim();
     var turnoCampo = turnoCampoOnly_(row, headers);
-    var fundo = fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa'));
+    var fundoRaw = cell_(row, headers, 'Fundo');
+    var etapaRaw = cell_(row, headers, 'Etapa');
+    var etapaSheet = etapaSheetLabel_(fundoRaw, etapaRaw);
+    var fundo = fundoLabel(fundoRaw, etapaRaw);
     var area = num(cell_(row, headers, 'Avance') || cell_(row, headers, 'Area'));
     if (turnoCampo === 'Tarde') {
       var base = mananaAv[fecha + '|' + String(cell_(row, headers, 'Lote') || '').trim()] || 0;
@@ -745,10 +775,11 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
     var jornales = num(cell_(row, headers, 'Jornales'));
     var tipos = tiposDeFila_(row, headers);
     tipos.forEach(function (t, idx) {
-      var key = [fecha, t.tipo, fundo, md, variedad, turno].join('|');
+      var key = [fecha, etapaSheet, t.tipo, fundo, md, variedad, turno].join('|');
       if (!groups[key]) {
         groups[key] = {
           iso: fecha,
+          etapaSheet: etapaSheet,
           semana: isoWeek(fecha),
           fecha: fmtDate(fecha),
           tipo: t.tipo,
@@ -788,11 +819,12 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
   var byDay = {};
   order.forEach(function (key) {
     var g = groups[key];
-    if (!byDay[g.iso]) byDay[g.iso] = [];
+    var bucket = g.iso + '|' + (g.etapaSheet || 'ETAPA I');
+    if (!byDay[bucket]) byDay[bucket] = [];
     var jornales = num(g.jornales);
     var kgHa = g.area > 0 ? Math.round(g.kilos / g.area) : '';
     var kgJn = jornales > 0 ? Math.round(g.kilos / jornales) : '';
-    byDay[g.iso].push([
+    byDay[bucket].push([
       g.semana, g.fecha, g.tipo, g.fundo, g.md, g.variedad, g.turno || '',
       g.envase, '', g.responsable || RESPONSABLE_FIJO, '',
       Math.round(g.area * 100) / 100, jornales,
@@ -803,9 +835,14 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
 }
 
 function writeByDay_(ss, byDay) {
-  Object.keys(byDay || {}).sort().forEach(function (iso) {
-    var sh = daySheet_(ss, iso);
-    if (sh) writeDaySheet_(sh, byDay[iso]);
+  Object.keys(byDay || {}).sort().forEach(function (bucket) {
+    var rows = byDay[bucket] || [];
+    if (!rows.length) return;
+    var parts = String(bucket).split('|');
+    var iso = parts[0];
+    var etapa = parts.slice(1).join('|') || 'ETAPA I';
+    var sh = daySheet_(ss, iso, etapa, true);
+    if (sh) writeDaySheet_(sh, rows);
   });
 }
 
@@ -904,28 +941,42 @@ function mergeDaysFromDeltas_(ss, headers, deltas, logSh) {
   var bySub = groupLogToDays_(headers, oldRows, mananaAv);
   var byAdd = groupLogToDays_(headers, newRows, mananaAv);
   isoList.forEach(function (iso) {
-    var sh = daySheet_(ss, iso);
-    if (!sh) return;
-    var map = {};
-    var order = [];
-    readDaySheetRows_(sh).forEach(function (r) {
-      var k = dayRowKey_(r);
-      if (!map.hasOwnProperty(k)) {
-        order.push(k);
-        map[k] = r.slice(0, RESUMEN_HEADERS.length);
+    var buckets = {};
+    Object.keys(bySub || {}).forEach(function (k) {
+      if (k === iso || k.indexOf(iso + '|') === 0) buckets[k] = true;
+    });
+    Object.keys(byAdd || {}).forEach(function (k) {
+      if (k === iso || k.indexOf(iso + '|') === 0) buckets[k] = true;
+    });
+    if (!Object.keys(buckets).length) return;
+    Object.keys(buckets).forEach(function (bucket) {
+      var parts = String(bucket).split('|');
+      var etapa = parts.length > 1 ? parts.slice(1).join('|') : 'ETAPA I';
+      var map = {};
+      var order = [];
+      var existing = daySheet_(ss, iso, etapa, false);
+      if (existing) {
+        readDaySheetRows_(existing).forEach(function (r) {
+          var k = dayRowKey_(r);
+          if (!map.hasOwnProperty(k)) {
+            order.push(k);
+            map[k] = r.slice(0, RESUMEN_HEADERS.length);
+          }
+        });
       }
-      // Si ya existe la misma clave (duplicado en hoja), se ignora: no sumar otra vez.
+      applyDayRows_(map, order, bySub[bucket] || [], -1);
+      applyDayRows_(map, order, byAdd[bucket] || [], 1);
+      var out = [];
+      var seen = {};
+      order.forEach(function (k) {
+        if (!map[k] || seen[k]) return;
+        seen[k] = true;
+        out.push(map[k]);
+      });
+      if (!out.length) return;
+      var sh = existing || daySheet_(ss, iso, etapa, true);
+      if (sh) writeDaySheet_(sh, out);
     });
-    applyDayRows_(map, order, bySub[iso] || [], -1);
-    applyDayRows_(map, order, byAdd[iso] || [], 1);
-    var out = [];
-    var seen = {};
-    order.forEach(function (k) {
-      if (!map[k] || seen[k]) return;
-      seen[k] = true;
-      out.push(map[k]);
-    });
-    writeDaySheet_(sh, out);
   });
 }
 
@@ -1121,10 +1172,7 @@ function rebuildDays_(ss, headers, values, isoList) {
     if (want[f]) filtered.push(row);
   });
   var byDay = groupLogToDays_(headers, filtered);
-  Object.keys(want).forEach(function (iso) {
-    var sh = daySheet_(ss, iso);
-    if (sh) writeDaySheet_(sh, byDay[iso] || []);
-  });
+  writeByDay_(ss, byDay);
 }
 
 function ensureRespSheet_(ss) {

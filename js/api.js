@@ -363,7 +363,7 @@ APP.API = (() => {
       md: L.md || rec.md,
       modulo: L.modulo || rec.modulo,
       variedad: L.variedad || rec.variedad,
-      fundo: L.fundo || rec.fundo,
+      fundo: String(rec.fundo || "").trim() || L.fundo || "",
       etapa: L.etapa || rec.etapa,
     };
   }
