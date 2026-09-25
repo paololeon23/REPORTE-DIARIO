@@ -25,8 +25,12 @@ var ACUM_HEADERS = [
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
   'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
-var MERGE_PROP_KEY = 'qb_merge_queue';
-var MERGE_TRIGGER_FN = 'runQueuedMerge_';
+var ACUM_HEADERS = [
+  'Fecha', 'Semana', 'Supervisor', 'Supervisor DNI', 'Turno campo',
+  'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Área',
+  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
+  'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
+];
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -49,25 +53,23 @@ function doPost(e) {
     var recs = normalizeRecs_(body);
     var headers = ensureHeaders_(sh);
 
-    // 1) Guardar SIEMPRE el POST (esto es lo que importa).
+    // Borra cualquier cola vieja SIN escribirla. No se revive lo ya enviado.
+    dropMergeQueue_();
+
     var result = upsertBatch_(sh, recs, headers);
     SpreadsheetApp.flush();
 
-    // 2) Responder ok YA → el celular confirma y no se congela.
-    var response = {
+    if (result.changed && result.deltas && result.deltas.length) {
+      try { applyMergeDeltas_(result.deltas); } catch (mergeErr) {}
+    }
+
+    return jsonOut_({
       ok: true,
       accepted: result.accepted || [],
       existing: result.existing || [],
       saved: (result.accepted || []).length + (result.existing || []).length,
       flushed: true
-    };
-
-    // 3) Armar hojas visibles DESPUÉS (cola durable, no CacheService).
-    if (result.changed && result.deltas && result.deltas.length) {
-      queueMergeDeltas_(result.deltas);
-    }
-
-    return jsonOut_(response);
+    });
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
@@ -75,39 +77,14 @@ function doPost(e) {
   }
 }
 
-/** Cola durable en PropertiesService (no es cache): el POST ya quedó en _lotes. */
-function queueMergeDeltas_(deltas) {
+/** Tira la cola anterior. No la aplica: solo cuenta el POST actual. */
+function dropMergeQueue_() {
+  try { PropertiesService.getScriptProperties().deleteProperty('qb_merge_queue'); } catch (e0) {}
   try {
-    var props = PropertiesService.getScriptProperties();
-    var arr = [];
-    var prev = props.getProperty(MERGE_PROP_KEY);
-    if (prev) {
-      try {
-        var p = JSON.parse(prev);
-        if (Object.prototype.toString.call(p) === '[object Array]') arr = p;
-      } catch (e0) {}
-    }
-    arr = arr.concat(deltas || []);
-    var payload = JSON.stringify(arr);
-    if (payload.length > 8500) {
-      applyMergeDeltas_(arr);
-      props.deleteProperty(MERGE_PROP_KEY);
-      return;
-    }
-    props.setProperty(MERGE_PROP_KEY, payload);
-    ensureMergeTrigger_();
-  } catch (e1) {
-    try { applyMergeDeltas_(deltas); } catch (e2) {}
-  }
-}
-
-function ensureMergeTrigger_() {
-  var triggers = ScriptApp.getProjectTriggers();
-  var i;
-  for (i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === MERGE_TRIGGER_FN) return;
-  }
-  ScriptApp.newTrigger(MERGE_TRIGGER_FN).timeBased().after(800).create();
+    ScriptApp.getProjectTriggers().forEach(function (t) {
+      if (t.getHandlerFunction() === 'runQueuedMerge_') ScriptApp.deleteTrigger(t);
+    });
+  } catch (e1) {}
 }
 
 function applyMergeDeltas_(deltas) {
@@ -120,27 +97,6 @@ function applyMergeDeltas_(deltas) {
   try { mergeResponsablesFromDeltas_(ss, headers, deltas); } catch (e2) {}
   try { mergeAcumuladoFromDeltas_(ss, headers, deltas); } catch (e3) {}
   SpreadsheetApp.flush();
-}
-
-function runQueuedMerge_() {
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(25000)) return;
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var raw = props.getProperty(MERGE_PROP_KEY);
-    if (!raw) return;
-    props.deleteProperty(MERGE_PROP_KEY);
-    var deltas = JSON.parse(raw);
-    applyMergeDeltas_(deltas);
-  } catch (err) {
-  } finally {
-    try { lock.releaseLock(); } catch (e4) {}
-    try {
-      ScriptApp.getProjectTriggers().forEach(function (t) {
-        if (t.getHandlerFunction() === MERGE_TRIGGER_FN) ScriptApp.deleteTrigger(t);
-      });
-    } catch (e5) {}
-  }
 }
 
 /**
@@ -1489,30 +1445,42 @@ function acumuladoRowFromLog_(row, headers) {
   ];
 }
 
-function acumuladoKeyFromValues_(values) {
-  if (!values || !values.length) return '';
-  var iso = toIsoFecha_(values[0]);
+function acumuladoKeyFromValues_(values, idx) {
+  if (!values || !idx) return '';
+  var iso = toIsoFecha_(values[idx.fecha]);
   if (!iso) {
-    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(values[0] || '').trim());
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(values[idx.fecha] || '').trim());
     if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
   }
-  var dni = String(values[3] || '').replace(/\D/g, '').slice(0, 8);
-  var lote = String(values[8] || '').trim();
-  var tc = /tarde/i.test(String(values[4] || '')) ? 'Tarde' : 'Mañana';
+  var dni = String(values[idx.dni] || '').replace(/\D/g, '').slice(0, 8);
+  var lote = String(values[idx.lote] || '').trim();
+  var tc = /tarde/i.test(String(values[idx.tc] || '')) ? 'Tarde' : 'Mañana';
   if (!iso || !lote || !dni) return '';
   return iso + '|' + lote + '|' + tc + '|' + dni;
 }
 
 function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
   var sh = ensureAcumuladoSheet_(ss);
+  var head = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), ACUM_HEADERS.length)).getValues()[0];
+  function ix(name, fallback) {
+    var i = head.indexOf(name);
+    return i >= 0 ? i : fallback;
+  }
+  var idx = {
+    fecha: ix('Fecha', 0),
+    dni: ix('Supervisor DNI', 3),
+    tc: ix('Turno campo', 4),
+    lote: ix('Lote', 8)
+  };
   var byKey = {};
   var last = sh.getLastRow();
   if (last > 1) {
-    var data = sh.getRange(2, 1, last, ACUM_HEADERS.length).getValues();
+    var width = Math.max(head.length, ACUM_HEADERS.length);
+    var data = sh.getRange(2, 1, last, width).getValues();
     var i;
     for (i = 0; i < data.length; i++) {
-      var k = acumuladoKeyFromValues_(data[i]);
-      if (k) byKey[k] = i + 2;
+      var k = acumuladoKeyFromValues_(data[i], idx);
+      if (k && !byKey.hasOwnProperty(k)) byKey[k] = i + 2;
     }
   }
 
@@ -1526,7 +1494,7 @@ function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
     if (!key || seen[key]) return;
     seen[key] = true;
     var values = acumuladoRowFromLog_(neu, headers);
-    if (byKey.hasOwnProperty(key)) {
+    if (byKey.hasOwnProperty(key) && byKey[key] > 0) {
       updates.push({ row: byKey[key], values: values });
     } else {
       appends.push(values);

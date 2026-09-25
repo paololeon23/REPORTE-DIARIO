@@ -509,39 +509,14 @@ APP.API = (() => {
           report: { summary, turnoCampo, lotes: queue.length, final: last },
         });
         const confirmedAt = new Date().toISOString();
-        const ok = batch.filter((r) => okIds.has(r.clientId)).map((r) => r.clientId);
-        const fail = batch.filter((r) => !okIds.has(r.clientId));
+        const ok = batch.map((r) => r.clientId).filter(Boolean);
         if (ok.length) {
           patchMany(ok, { syncStatus: "confirmed", uploaded: true, syncedAt: confirmedAt }, true);
           ackOutboxIds(ok);
+          clearOutboxReport(turnoCampo);
           sent += ok.length;
-          window.dispatchEvent(new Event("app:activity"));
-          const leftAfter = pendingOf().length;
-          if (onProgress) {
-            onProgress({
-              sent,
-              left: leftAfter,
-              total: sent + leftAfter,
-              reports: pendingCount(),
-              confirmed: ok.length,
-            });
-          }
-        }
-        if (fail.length) {
-          write(
-            all().map((r) =>
-              fail.some((f) => f.clientId === r.clientId)
-                ? { ...r, syncStatus: "pending", syncAttempts: Number(r.syncAttempts || 0) + 1 }
-                : r
-            ),
-            true
-          );
-          failures += 1;
-          if (failures >= MAX_FLUSH_FAILURES) {
-            break;
-          }
-        } else {
           failures = 0;
+          window.dispatchEvent(new Event("app:activity"));
         }
       } catch (_) {
         write(
