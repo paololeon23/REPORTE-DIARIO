@@ -16,7 +16,7 @@ var RESUMEN_HEADERS = [
   'Área', 'Jornales', 'Kilos', 'Kg/ha', 'Kg/Jornales', 'Hora registro'
 ];
 var RESP_HEADERS = [
-  'Fecha', 'Supervisor', 'Supervisor DNI', 'Turno campo', 'Jarras', 'Kilos', 'Hora registro'
+  'Fecha', 'Supervisor', 'Supervisor DNI', 'Turno campo', 'Fundo', 'Jarras', 'Kilos', 'Hora registro'
 ];
 var ACUM = 'Acumulado';
 var ACUM_HEADERS = [
@@ -940,8 +940,9 @@ function respKeyFromLogRow_(row, headers) {
   var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
   var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
   var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
+  var fundo = fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa'));
   if (!fecha || (!nombre && !dni)) return '';
-  return fecha + '|' + (dni.length === 8 ? dni : nombre.toUpperCase());
+  return fecha + '|' + (dni.length === 8 ? dni : nombre.toUpperCase()) + '|' + String(fundo || '').toUpperCase();
 }
 
 function contribResponsables_(headers, values) {
@@ -952,6 +953,7 @@ function contribResponsables_(headers, values) {
     var fecha = toIsoFecha_(cell_(row, headers, 'Fecha'));
     var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
     var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
+    var fundo = fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa'));
     var turnoCampo = turnoCampoOnly_(row, headers);
     var jarras = num(cell_(row, headers, 'Total Jarras'));
     if (!(jarras > 0)) jarras = num(cell_(row, headers, 'Jarras Conv')) + num(cell_(row, headers, 'Jarras China'));
@@ -964,6 +966,7 @@ function contribResponsables_(headers, values) {
         fecha: fmtDate(fecha),
         supervisor: nombre || dni,
         dni: dni,
+        fundo: fundo,
         manana: false,
         tarde: false,
         jarras: 0,
@@ -975,6 +978,7 @@ function contribResponsables_(headers, values) {
     var g = map[key];
     if (nombre) g.supervisor = nombre;
     if (dni) g.dni = dni;
+    if (fundo) g.fundo = fundo;
     g.jarras += jarras;
     g.kilos += kilos;
     if (turnoCampo === 'Tarde') {
@@ -1001,7 +1005,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
   var map = {};
   var order = [];
 
-  function respKeyFromSheetRow_(fechaDisp, dni, nombre) {
+  function respKeyFromSheetRow_(fechaDisp, dni, nombre, fundo) {
     var iso = toIsoFecha_(fechaDisp);
     if (!iso) {
       var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(fechaDisp || '').trim());
@@ -1009,8 +1013,9 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
     }
     var id = String(dni || '').replace(/\D/g, '').slice(0, 8);
     var nom = String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    var fu = String(fundo || '').trim().toUpperCase();
     if (!iso) return '';
-    return iso + '|' + (id.length === 8 ? id : nom);
+    return iso + '|' + (id.length === 8 ? id : nom) + '|' + fu;
   }
 
   if (sh.getLastRow() > 1) {
@@ -1020,6 +1025,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
     var si = have.indexOf('Supervisor');
     var di = have.indexOf('Supervisor DNI');
     var ti = have.indexOf('Turno campo');
+    var fui = have.indexOf('Fundo');
     var ji = have.indexOf('Jarras');
     var ki = have.indexOf('Kilos');
     var hi = have.indexOf('Hora registro');
@@ -1027,9 +1033,9 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
       var fechaDisp = row[fi >= 0 ? fi : 0];
       var nombre = row[si >= 0 ? si : 1];
       var dni = row[di >= 0 ? di : 2];
-      var key = respKeyFromSheetRow_(fechaDisp, dni, nombre);
-      if (!key || key.charAt(key.length - 1) === '|') return;
-      // Duplicado en hoja: conservar solo la primera (no sumar otra vez).
+      var fundo = fui >= 0 ? row[fui] : '';
+      var key = respKeyFromSheetRow_(fechaDisp, dni, nombre, fundo);
+      if (!key || key.indexOf('||') !== -1) return;
       if (map.hasOwnProperty(key)) return;
       var iso = key.split('|')[0];
       var tc = String(row[ti >= 0 ? ti : 3] || '');
@@ -1038,10 +1044,11 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
         fecha: fmtDate(iso) || String(fechaDisp || ''),
         supervisor: String(nombre || '').replace(/\s+/g, ' ').trim() || String(dni || ''),
         dni: String(dni || '').replace(/\D/g, '').slice(0, 8),
+        fundo: String(fundo || '').trim(),
         manana: /mañana/i.test(tc),
         tarde: /tarde/i.test(tc),
-        jarras: num(row[ji >= 0 ? ji : 4]),
-        kilos: num(row[ki >= 0 ? ki : 5]),
+        jarras: num(row[ji >= 0 ? ji : 5]),
+        kilos: num(row[ki >= 0 ? ki : 6]),
         horaManana: '',
         horaTarde: ''
       };
@@ -1061,6 +1068,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
           fecha: c.fecha,
           supervisor: c.supervisor,
           dni: c.dni,
+          fundo: c.fundo || '',
           manana: false,
           tarde: false,
           jarras: 0,
@@ -1073,6 +1081,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
       var g = map[key];
       if (c.supervisor) g.supervisor = c.supervisor;
       if (c.dni) g.dni = c.dni;
+      if (c.fundo) g.fundo = c.fundo;
       g.jarras = num(g.jarras) + sign * num(c.jarras);
       g.kilos = num(g.kilos) + sign * num(c.kilos);
       if (sign > 0) {
@@ -1103,6 +1112,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
       g.supervisor,
       g.dni,
       turnoCampo,
+      g.fundo || '',
       Math.round(g.jarras),
       Math.round(g.kilos * 100) / 100,
       hora
@@ -1159,8 +1169,10 @@ function groupResponsables_(headers, values) {
     var nombre = String(cell_(row, headers, 'Supervisor') || '').replace(/\s+/g, ' ').trim();
     var dni = String(cell_(row, headers, 'Supervisor DNI') || '').replace(/\D/g, '').slice(0, 8);
     if (!nombre && !dni) return;
-    var key = fecha + '|' + (dni || nombre.toUpperCase());
+    var key = respKeyFromLogRow_(row, headers);
+    if (!key) return;
     var turnoCampo = turnoCampoOnly_(row, headers);
+    var fundo = fundoLabel(cell_(row, headers, 'Fundo'), cell_(row, headers, 'Etapa'));
     var jarras = num(cell_(row, headers, 'Total Jarras'));
     if (!(jarras > 0)) {
       jarras = num(cell_(row, headers, 'Jarras Conv')) + num(cell_(row, headers, 'Jarras China'));
@@ -1176,6 +1188,7 @@ function groupResponsables_(headers, values) {
         fecha: fmtDate(fecha),
         supervisor: nombre || dni,
         dni: dni,
+        fundo: fundo,
         manana: false,
         tarde: false,
         jarras: 0,
@@ -1208,6 +1221,7 @@ function groupResponsables_(headers, values) {
       g.supervisor,
       g.dni,
       turnoCampo,
+      g.fundo || '',
       Math.round(g.jarras),
       Math.round(g.kilos * 100) / 100,
       hora
@@ -1234,12 +1248,12 @@ function writeResponsablesSheet_(sh, rows) {
       .setFontWeight('normal')
       .setBackground('#FFFFFF')
       .setHorizontalAlignment('center');
-    sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0');
-    sh.getRange(2, 6, rows.length, 1).setNumberFormat('0.00');
+    sh.getRange(2, 6, rows.length, 1).setNumberFormat('#,##0');
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat('0.00');
   }
   if (wasEmpty) {
     sh.setFrozenRows(1);
-    var widths = [92, 220, 100, 110, 70, 70, 86];
+    var widths = [92, 220, 100, 110, 110, 70, 70, 86];
     widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
     sh.setTabColor('#F7941D');
   }
