@@ -180,66 +180,96 @@ APP.Data = (() => {
 
   function etapaKind(etapa) {
     const e = String(etapa || "").trim().toUpperCase();
-    if (e.includes("II")) return "II";
+    if (/\bII\b/.test(e) || e.endsWith(" II")) return "II";
+    if (e.includes("II") && !e.includes("III")) return "II";
     if (e.includes("I") || e.includes("LICAPA")) return "I";
     return "";
   }
 
-  function buildLoteCatalog(raw) {
-    const all = Array.isArray(raw) ? raw : [];
-    const groups = new Map();
-    all.forEach((l) => {
-      const n = String(l.lote ?? "").trim();
-      if (!n) return;
-      if (!groups.has(n)) groups.set(n, []);
-      groups.get(n).push(l);
-    });
-    lotes = [];
-    lotesById = {};
-    groups.forEach((group, num) => {
-      const licapaI = group.find((l) => etapaKind(l.etapa) === "I");
-      const licapaII = group.find((l) => etapaKind(l.etapa) === "II");
-      let pick;
-      let etapaLabel;
-      if (licapaI && licapaII) {
-        pick = licapaI;
-        etapaLabel = "Licapa I/II";
-      } else if (licapaI) {
-        pick = licapaI;
-        etapaLabel = "Licapa I";
-      } else if (licapaII) {
-        pick = licapaII;
-        etapaLabel = "Licapa II";
-      } else {
-        pick = group[0];
-        etapaLabel = String(pick.etapa || "").trim();
-      }
-      const entry = normalizeLote({ ...pick, lote: num, etapa: etapaLabel });
-      lotes.push(entry);
-      lotesById[num] = entry;
-      lotesById[`Q${num}`] = entry;
-      if (entry.codLote) lotesById[entry.codLote] = entry;
-    });
+  function fundoKind(fundo) {
+    const f = String(fundo || "").trim().toUpperCase();
+    if (f.endsWith(" IV") || f === "IV") return "IV";
+    if (f.endsWith(" III") || f === "III") return "III";
+    if (f.endsWith(" II") || f === "II") return "II";
+    if (f.endsWith(" I") || f === "I") return "I";
+    return "";
+  }
+
+  function compactLoteId(id) {
+    return String(id || "").replace(/\s+/g, "").toUpperCase();
+  }
+
+  function sortLotes() {
     lotes.sort((a, b) => {
       const na = parseInt(String(a.lote), 10);
       const nb = parseInt(String(b.lote), 10);
       const fa = Number.isFinite(na) ? na : 99999;
       const fb = Number.isFinite(nb) ? nb : 99999;
-      return fa !== fb ? fa - fb : String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
+      if (fa !== fb) return fa - fb;
+      const byName = String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
+      if (byName) return byName;
+      return String(a.etapa).localeCompare(String(b.etapa), "es");
     });
   }
 
-  function findLote(id) {
-    const key = String(id || "").trim();
-    return lotesById[key] || lotesById[key.replace(/^Q/i, "")] || null;
+  function indexLote(entry) {
+    const num = String(entry.lote);
+    const kind = etapaKind(entry.etapa) || "I";
+    const compact = compactLoteId(num);
+    lotesById[num + "|" + kind] = entry;
+    if (compact !== num.toUpperCase()) lotesById[compact + "|" + kind] = entry;
+    const bare = lotesById[num];
+    if (!bare || (kind === "I" && etapaKind(bare.etapa) !== "I")) {
+      lotesById[num] = entry;
+      lotesById["Q" + num] = entry;
+      if (compact !== num.toUpperCase()) {
+        lotesById[compact] = entry;
+        lotesById["Q" + compact] = entry;
+      }
+    }
+    if (entry.codLote) {
+      lotesById[entry.codLote] = entry;
+      const codCompact = String(entry.codLote).replace(/\s+/g, "");
+      if (codCompact !== entry.codLote) lotesById[codCompact] = entry;
+    }
   }
 
-  function loteOptions(query) {
+  function buildLoteCatalog(raw) {
+    const all = Array.isArray(raw) ? raw : [];
+    lotes = [];
+    lotesById = {};
+    all.forEach((l) => {
+      const num = String(l.lote ?? "").trim();
+      if (!num) return;
+      const kind = etapaKind(l.etapa) || "I";
+      const etapaLabel = kind === "II" ? "Licapa II" : kind === "I" ? "Licapa I" : String(l.etapa || "").trim();
+      const slot = compactLoteId(num) + "|" + kind;
+      if (lotesById[slot]) return;
+      const entry = normalizeLote({ ...l, lote: num, etapa: etapaLabel });
+      lotes.push(entry);
+      indexLote(entry);
+    });
+    sortLotes();
+  }
+
+  function findLote(id, fundo) {
+    const key = String(id || "").trim();
+    if (!key) return null;
+    const bare = key.replace(/^Q/i, "");
+    const compact = compactLoteId(bare);
+    const kind = fundoKind(fundo);
+    if (kind) return lotesById[bare + "|" + kind] || lotesById[compact + "|" + kind] || null;
+    return lotesById[key] || lotesById[bare] || lotesById[compact] || lotesById["Q" + bare] || null;
+  }
+
+  function loteOptions(query, fundo) {
     const s = String(query || "").trim().toLowerCase();
+    const kind = fundoKind(fundo);
     const out = [];
-    const limit = s ? 80 : 50;
+    const limit = s ? 40 : 32;
     for (let i = 0; i < lotes.length; i++) {
       const l = lotes[i];
+      if (kind && etapaKind(l.etapa) !== kind) continue;
       const loteStr = String(l.lote).toLowerCase();
       if (s) {
         const hay = `${l.lote} ${l.md} ${l.modulo} ${l.turno} ${l.variedad} ${l.etapa} ${l.codLote}`.toLowerCase();
@@ -255,6 +285,7 @@ APP.Data = (() => {
         lote: l,
         _rank: s && loteStr === s ? 0 : s && loteStr.startsWith(s) ? 1 : 2,
       });
+      if (!s && out.length >= limit) break;
     }
     if (s) out.sort((a, b) => a._rank - b._rank || parseInt(a.id, 10) - parseInt(b.id, 10));
     return out.slice(0, limit).map(({ _rank, ...opt }) => opt);
@@ -282,18 +313,19 @@ APP.Data = (() => {
       const hit = byLote[String(l.lote)];
       if (!hit) return;
       const ha = Number(hit.ha);
+      const mid = hit.modulo != null && hit.modulo !== "" ? String(hit.modulo) : "";
+      if (etapaKind(l.etapa) === "II") return;
       if (Number.isFinite(ha) && ha > 0) l.area = ha;
       const turno = tunelToTurno(hit.tunel);
       if (turno) l.turno = turno;
-      if (hit.modulo != null && hit.modulo !== "") {
-        const mid = String(hit.modulo);
+      if (mid) {
         const mod = modules[mid];
         l.md = mid;
         l.modulo = (mod && mod.label) || "M" + mid;
       }
     });
     Object.keys(byLote).forEach((key) => {
-      if (lotesById[key]) return;
+      if (lotesById[key + "|I"] || lotesById[key + "|II"]) return;
       const hit = byLote[key];
       const mid = hit.modulo != null ? String(hit.modulo) : "";
       const mod = modules[mid];
@@ -307,14 +339,26 @@ APP.Data = (() => {
         ha: hit.ha,
       });
       lotes.push(entry);
-      lotesById[key] = entry;
+      indexLote(entry);
     });
-    lotes.sort((a, b) => {
-      const na = parseInt(String(a.lote), 10);
-      const nb = parseInt(String(b.lote), 10);
-      const fa = Number.isFinite(na) ? na : 99999;
-      const fb = Number.isFinite(nb) ? nb : 99999;
-      return fa !== fb ? fa - fb : String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
+    sortLotes();
+  }
+
+  function applyEtapaIIAreas(map) {
+    if (!map || !Array.isArray(map.lots) || !map.lots.length) return;
+    const byLote = {};
+    map.lots.forEach((lot) => {
+      const key = String(lot.lote ?? "").trim();
+      if (key) byLote[key] = lot;
+    });
+    lotes.forEach((l) => {
+      if (etapaKind(l.etapa) !== "II") return;
+      const hit = byLote[String(l.lote)];
+      if (!hit) return;
+      const mid = hit.modulo != null && hit.modulo !== "" ? String(hit.modulo) : "";
+      if (mid && mid !== String(l.md || "").replace(/^M/i, "")) return;
+      const ha = Number(hit.ha);
+      if (Number.isFinite(ha) && ha > 0) l.area = ha;
     });
   }
 
@@ -406,8 +450,9 @@ APP.Data = (() => {
       fetchJson("./data/lotes-licapa.json"),
       fetchJson("./data/supervisores-cosecha.json"),
       fetchJson("./data/plano-cosecha-etapa-i.json"),
+      fetchJson("./data/plano-cosecha-etapa-ii.json"),
     ])
-      .then(([lotesJson, supJson, mapJson]) => {
+      .then(([lotesJson, supJson, mapJson, mapII]) => {
         if (Array.isArray(lotesJson) && lotesJson.length) buildLoteCatalog(lotesJson);
         else applyEmbeddedCatalogs();
         if (supJson && supJson.byDni && Object.keys(supJson.byDni).length) {
@@ -419,6 +464,7 @@ APP.Data = (() => {
           ? mapJson
           : window.APP_PLANO;
         if (map && Array.isArray(map.lots)) applyMapData(map);
+        if (mapII && Array.isArray(mapII.lots)) applyEtapaIIAreas(mapII);
         if (!lotes.length) applyEmbeddedCatalogs();
         ready = lotes.length > 0;
         window.dispatchEvent(new Event("app:catalogs"));
@@ -442,7 +488,9 @@ APP.Data = (() => {
     return loading;
   }
 
-  function jarraKg() {
+  function jarraKg(data) {
+    const row = Number(data && data.pesoJarra);
+    if (Number.isFinite(row) && row > 0) return row;
     const n = Number(APP.CONFIG && APP.CONFIG.JARRA_KG);
     return Number.isFinite(n) && n > 0 ? n : 1.14;
   }
@@ -451,8 +499,9 @@ APP.Data = (() => {
     return Math.round((Number(n) || 0) * 100) / 100;
   }
 
-  function kgEffective(jarras) {
-    return round2((Number(jarras) || 0) * jarraKg());
+  function kgEffective(jarras, factor) {
+    const k = Number.isFinite(factor) && factor > 0 ? factor : jarraKg();
+    return round2((Number(jarras) || 0) * k);
   }
 
   function derive(data) {
@@ -460,8 +509,9 @@ APP.Data = (() => {
     const jChina = Number(data.jarrasChina) || 0;
     const area = Number(data.avance || data.area) || 0;
     const jornales = Number(data.jornales) || 0;
-    const kgConvEff = kgEffective(jConv);
-    const kgChinaEff = kgEffective(jChina);
+    const factor = jarraKg(data);
+    const kgConvEff = kgEffective(jConv, factor);
+    const kgChinaEff = kgEffective(jChina, factor);
     const totalJarras = jConv + jChina;
     const totalKg = round2(kgConvEff + kgChinaEff);
     return {

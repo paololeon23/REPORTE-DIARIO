@@ -144,7 +144,7 @@ APP.PreciseSelect = (() => {
         </button>`;
           })
           .join("")
-      : `<p class="empty">Sin resultados</p>`;
+      : `<p class="empty">${String(emptyText).replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"))}</p>`;
     listEl.querySelectorAll(".precise-opt").forEach((btn) => {
       btn.onclick = () => {
         const opt = opts.find((o) => String(o.id) === btn.dataset.id);

@@ -15,6 +15,7 @@ APP.App = (() => {
       etapa: "",
       fundo: "",
       turnoCampo: "Mañana",
+      pesoJarra: "1.14",
     },
     lote: null,
     avance: "",
@@ -192,6 +193,8 @@ APP.App = (() => {
       scan.textContent = name || "Seleccionar…";
     }
     if (jn) jn.value = state.session.jornales > 0 ? String(state.session.jornales) : "";
+    if (!state.session.pesoJarra) state.session.pesoJarra = "1.14";
+    paintPeso();
     const fundo = canonFundo(state.session.fundo);
     if (fundo) state.session.fundo = fundo;
     const lblFundo = $("#lbl-fundo");
@@ -234,7 +237,7 @@ APP.App = (() => {
   }
 
   function morningAvanceOf(lote) {
-    const rec = APP.API.recordOf(lote, today(), "Mañana", supDni());
+    const rec = APP.API.recordOf(lote, today(), "Mañana", supDni(), state.session.fundo);
     const n = Number(rec && rec.avance);
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
@@ -358,12 +361,37 @@ APP.App = (() => {
       scannerDni: state.session.scannerDni,
       supervisor: APP.Data.fullName(state.session.supervisorDni, state.session.supervisorNombre) || state.session.supervisorNombre || "",
       supervisorDni: state.session.supervisorDni,
+      pesoJarra: pesoNum(),
     };
+  }
+
+  function sanitizePeso(raw) {
+    let s = String(raw ?? "").replace(",", ".");
+    s = s.replace(/[^\d.]/g, "");
+    const dot = s.indexOf(".");
+    if (dot !== -1) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, "").slice(0, 3);
+    return s;
+  }
+
+  function pesoNum() {
+    const raw = sanitizePeso(state.session.pesoJarra ?? "1.14");
+    const n = Number(raw.endsWith(".") ? raw.slice(0, -1) : raw);
+    return Number.isFinite(n) && n > 0 ? n : 1.14;
+  }
+
+  function paintPeso() {
+    const el = $("#inp-peso");
+    if (!el || document.activeElement === el) return;
+    const v = sanitizePeso(state.session.pesoJarra ?? "1.14");
+    el.value = v || "1.14";
   }
 
   function paintTotals() {
     const d = APP.Data.derive(currentData());
-    $("#live-totals").innerHTML = `<span>${d.totalJarras} jarras</span><span>${d.totalKg} kg</span>`;
+    const j = $("#lbl-jarras");
+    const k = $("#lbl-kg");
+    if (j) j.textContent = d.totalJarras + " jarras";
+    if (k) k.textContent = d.totalKg + " kg";
     paintSaveBtn();
   }
 
@@ -407,7 +435,7 @@ APP.App = (() => {
       ? records
           .map((r) => {
             const d = APP.Data.derive(r);
-            const L = APP.Data.findLote(r.lote) || {};
+            const L = APP.Data.findLote(r.lote, r.fundo) || {};
             const tc = r.turnoCampo || "Mañana";
             const area = L.area !== "" && L.area != null ? L.area : (r.area !== "" && r.area != null ? r.area : "—");
             const avance = r.avance !== "" && r.avance != null ? r.avance : "—";
@@ -437,10 +465,10 @@ APP.App = (() => {
                 </div>
               </article>
               <div class="lot-acts">
-                <button type="button" class="lot-act edit" data-edit="${esc(r.lote)}" data-tc="${tc}" aria-label="Editar">
+                <button type="button" class="lot-act edit" data-edit="${esc(r.lote)}" data-tc="${tc}" data-fundo="${esc(r.fundo || "")}" aria-label="Editar">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
                 </button>
-                <button type="button" class="lot-act del" data-del="${esc(r.lote)}" data-tc="${tc}" aria-label="Eliminar"${subido ? " disabled" : ""}>
+                <button type="button" class="lot-act del" data-del="${esc(r.lote)}" data-tc="${tc}" data-fundo="${esc(r.fundo || "")}" aria-label="Eliminar"${subido ? " disabled" : ""}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
                 </button>
               </div>
@@ -451,26 +479,26 @@ APP.App = (() => {
     $("#lot-list").querySelectorAll("[data-edit]").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
-        loadRecord(b.dataset.edit, b.dataset.tc);
+        loadRecord(b.dataset.edit, b.dataset.tc, b.dataset.fundo);
       };
     });
     $("#lot-list").querySelectorAll("[data-del]").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
-        removeLote(b.dataset.del, b.dataset.tc);
+        removeLote(b.dataset.del, b.dataset.tc, b.dataset.fundo);
       };
     });
   }
 
-  async function removeLote(loteId, turnoCampo) {
-    const rec = APP.API.recordOf(loteId, today(), turnoCampo, supDni());
+  async function removeLote(loteId, turnoCampo, fundo) {
+    const rec = APP.API.recordOf(loteId, today(), turnoCampo, supDni(), fundo);
     if (APP.API.isUploaded(rec)) {
       await feedback("No se puede eliminar", "Este lote ya está subido. Si hay un error, edítalo.");
       return;
     }
     const ok = await ask("Eliminar lote", `Se quita el lote ${loteId} de hoy. No está subido. ¿Seguro?`, "Eliminar");
     if (!ok) return;
-    const res = APP.API.removeTodayLote(loteId, turnoCampo, supDni());
+    const res = APP.API.removeTodayLote(loteId, turnoCampo, supDni(), fundo);
     if (!res.ok) {
       await feedback("No se eliminó", res.reason === "uploaded" ? "Este lote ya está subido." : "No se encontró el lote.");
       return;
@@ -481,13 +509,13 @@ APP.App = (() => {
     paintStatus();
   }
 
-  function loadRecord(loteId, turnoCampo) {
+  function loadRecord(loteId, turnoCampo, fundo) {
     const tc = turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     state.session.turnoCampo = tc;
     persistSession();
     paintPeople({ keepTurno: true });
-    const rec = APP.API.recordOf(loteId, today(), tc, supDni());
-    const L = APP.Data.findLote(loteId) || (rec && {
+    const rec = APP.API.recordOf(loteId, today(), tc, supDni(), fundo || state.session.fundo);
+    const L = APP.Data.findLote(loteId, (rec && rec.fundo) || fundo || state.session.fundo) || (rec && {
       lote: rec.lote,
       md: rec.md,
       modulo: rec.md ? "M" + rec.md : "",
@@ -683,18 +711,23 @@ APP.App = (() => {
       });
     });
     click("#trig-lote", async () => {
+      const fundo = canonFundo(state.session.fundo);
+      if (!fundo) {
+        await feedback("Falta el fundo", "Selecciona LICAPA I, II, III o IV.");
+        return;
+      }
       await APP.Data.load();
       if (!APP.Data.lotes.length) await APP.Data.load({ force: true });
       APP.PreciseSelect.open({
-        title: "Lote",
+        title: "Lote · " + fundo,
         placeholder: "Número de lote",
-        empty: APP.Data.lotes.length ? "Sin resultados" : "No se cargaron los lotes. Cierra y vuelve a abrir.",
+        empty: APP.Data.lotes.length ? "Sin lotes de " + fundo : "No se cargaron los lotes. Cierra y vuelve a abrir.",
         getOptions: (q) => {
-          const opts = APP.Data.loteOptions(q);
+          const opts = APP.Data.loteOptions(q, fundo);
           return opts
             .map((o) => {
               const tc = isTarde() ? "Tarde" : "Mañana";
-              const rec = APP.API.recordOf(o.id, today(), tc, supDni()) || (isTarde() ? APP.API.recordOf(o.id, today(), "Mañana", supDni()) : null);
+              const rec = APP.API.recordOf(o.id, today(), tc, supDni(), fundo) || (isTarde() ? APP.API.recordOf(o.id, today(), "Mañana", supDni(), fundo) : null);
               if (!rec) return o;
               const av = Number(rec.avance);
               const ha = Number.isFinite(av) && av > 0 ? av : 0;
@@ -713,10 +746,10 @@ APP.App = (() => {
             .sort((a, b) => Number(!!b.marked) - Number(!!a.marked));
         },
         onSelect: (opt) => {
-          const L = opt.lote || APP.Data.findLote(opt.id);
+          const L = opt.lote || APP.Data.findLote(opt.id, fundo);
           if (!L) return;
-          const tarde = APP.API.recordOf(L.lote, today(), "Tarde", supDni());
-          const manana = APP.API.recordOf(L.lote, today(), "Mañana", supDni());
+          const tarde = APP.API.recordOf(L.lote, today(), "Tarde", supDni(), fundo);
+          const manana = APP.API.recordOf(L.lote, today(), "Mañana", supDni(), fundo);
           fillLoteForm(L, tarde || (isTarde() ? null : manana));
           persistSession();
         },
@@ -772,6 +805,7 @@ APP.App = (() => {
         const opt = e.target.closest("[data-fundo]");
         if (!opt) return;
         state.session.fundo = canonFundo(opt.dataset.fundo);
+        if (state.lote && !APP.Data.findLote(state.lote.lote, state.session.fundo)) resetLoteInputs();
         persistSession();
         paintPeople();
         closeFundo();
@@ -788,6 +822,21 @@ APP.App = (() => {
     });
     on("#inp-avance", "input", () => applyAvance($("#inp-avance")?.value));
     on("#inp-avance", "blur", () => applyAvance($("#inp-avance")?.value, true));
+    on("#inp-peso", "input", () => {
+      const el = $("#inp-peso");
+      const text = sanitizePeso(el?.value);
+      state.session.pesoJarra = text;
+      if (el && el.value !== text) el.value = text;
+      persistSession();
+      paintTotals();
+    });
+    on("#inp-peso", "blur", () => {
+      state.session.pesoJarra = String(pesoNum());
+      const el = $("#inp-peso");
+      if (el) el.value = state.session.pesoJarra;
+      persistSession();
+      paintTotals();
+    });
     on("#inp-jconv", "input", () => {
       const el = $("#inp-jconv");
       state.jarrasConv = String(el?.value || "").replace(/\D/g, "");
@@ -899,7 +948,11 @@ APP.App = (() => {
     const draft = draftRecord();
     if (!draft) return list;
     const tc = draft.turnoCampo || "Mañana";
-    const i = list.findIndex((r) => String(r.lote) === String(draft.lote) && (r.turnoCampo || "Mañana") === tc);
+    const fa = String(draft.fundo || "").trim().toUpperCase();
+    const i = list.findIndex((r) => {
+      const fb = String(r.fundo || "").trim().toUpperCase();
+      return String(r.lote) === String(draft.lote) && (r.turnoCampo || "Mañana") === tc && (!fa || !fb || fa === fb);
+    });
     if (i >= 0) list[i] = { ...list[i], ...draft };
     else list.push(draft);
     return list.sort((a, b) => String(a.lote).localeCompare(String(b.lote), "es", { numeric: true }));
@@ -1206,7 +1259,7 @@ APP.App = (() => {
     const draft = draftRecord();
     if (!draft) return "";
     const tc = draft.turnoCampo || "Mañana";
-    const saved = APP.API.recordOf(draft.lote, today(), tc, supDni());
+    const saved = APP.API.recordOf(draft.lote, today(), tc, supDni(), draft.fundo);
     if (!saved) {
       return `Hay un lote ${draft.lote} en pantalla sin Guardar. No irá en el envío. Pulsa Guardar lote primero.`;
     }

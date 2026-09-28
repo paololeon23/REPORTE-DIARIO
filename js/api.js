@@ -103,12 +103,20 @@ APP.API = (() => {
     if (!silent) window.dispatchEvent(new Event("app:activity"));
   }
 
+  function sameFundo(a, b) {
+    const fa = String((a && a.fundo) || "").trim().toUpperCase();
+    const fb = String((b && b.fundo) || "").trim().toUpperCase();
+    if (!fa || !fb) return true;
+    return fa === fb;
+  }
+
   function sameLoteDay(a, b) {
     return (
       String(a.fecha) === String(b.fecha) &&
       String(a.lote) === String(b.lote) &&
       String(a.turnoCampo || "Mañana") === String(b.turnoCampo || "Mañana") &&
-      String(a.supervisorDni || "").trim() === String(b.supervisorDni || "").trim()
+      String(a.supervisorDni || "").trim() === String(b.supervisorDni || "").trim() &&
+      sameFundo(a, b)
     );
   }
 
@@ -144,7 +152,7 @@ APP.API = (() => {
       const tc = r.turnoCampo || "Mañana";
       if (turnoCampo && tc !== turnoCampo) return;
       const dni = String(r.supervisorDni || "").trim() || String(supervisorDni || "").trim();
-      byKey[String(r.lote) + "|" + tc + "|" + dni] = r;
+      byKey[String(r.lote) + "|" + tc + "|" + dni + "|" + String(r.fundo || "").trim().toUpperCase()] = r;
     });
     return Object.values(byKey).sort((a, b) => {
       const c = String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
@@ -152,8 +160,16 @@ APP.API = (() => {
     });
   }
 
-  function recordOf(lote, fecha, turnoCampo, supervisorDni) {
-    return localRecords(fecha, turnoCampo || "Mañana", supervisorDni).find((r) => String(r.lote) === String(lote)) || null;
+  function recordOf(lote, fecha, turnoCampo, supervisorDni, fundo) {
+    const want = String(fundo || "").trim().toUpperCase();
+    return (
+      localRecords(fecha, turnoCampo || "Mañana", supervisorDni).find((r) => {
+        if (String(r.lote) !== String(lote)) return false;
+        if (!want) return true;
+        const got = String(r.fundo || "").trim().toUpperCase();
+        return !got || got === want;
+      }) || null
+    );
   }
 
   function pendingRecords(supervisorDni) {
@@ -356,7 +372,7 @@ APP.API = (() => {
   }
 
   function catalogPatch(rec) {
-    const L = APP.Data && rec && rec.lote ? APP.Data.findLote(rec.lote) : null;
+    const L = APP.Data && rec && rec.lote ? APP.Data.findLote(rec.lote, rec.fundo) : null;
     if (!L) return rec;
     return {
       ...rec,
@@ -815,11 +831,11 @@ APP.API = (() => {
     localRecords,
     recordOf,
     isUploaded: (r) => !!(r && (r.uploaded || r.syncStatus === "confirmed")),
-    removeTodayLote: (lote, turnoCampo, supervisorDni) => {
+    removeTodayLote: (lote, turnoCampo, supervisorDni, fundo) => {
       const day = todayKey();
       const tc = turnoCampo === "Tarde" ? "Tarde" : "Mañana";
       const dni = String(supervisorDni || "").trim();
-      const rec = recordOf(lote, day, tc, dni || undefined);
+      const rec = recordOf(lote, day, tc, dni || undefined, fundo);
       if (!rec) return { ok: false, reason: "missing" };
       if (rec.uploaded || rec.syncStatus === "confirmed") return { ok: false, reason: "uploaded" };
       write(
@@ -827,6 +843,7 @@ APP.API = (() => {
           if (!r || String(r.fecha) !== day || String(r.lote) !== String(lote) || (r.turnoCampo || "Mañana") !== tc) {
             return true;
           }
+          if (!sameFundo(r, { fundo })) return true;
           if (dni) return String(r.supervisorDni || "").trim() !== dni;
           return false;
         })

@@ -48,7 +48,7 @@ APP.Excel = (() => {
       .sort((a, b) => String(a.lote).localeCompare(String(b.lote), "es", { numeric: true }));
 
     const rows = records.map((rec) => {
-      const L = APP.Data.findLote(rec.lote) || {};
+      const L = APP.Data.findLote(rec.lote, rec.fundo) || {};
       const d = APP.Data.derive(rec);
       return {
         fundo: rec.fundo || L.fundo || "",

@@ -1,4 +1,4 @@
-const CACHE = "qb-cosecha-v135";
+const CACHE = "qb-cosecha-v139";
 const ASSETS = [
   "./",
   "./index.html",
@@ -22,6 +22,7 @@ const ASSETS = [
   "./data/supervisores-cosecha.json",
   "./data/lotes-licapa.json",
   "./data/plano-cosecha-etapa-i.json",
+  "./data/plano-cosecha-etapa-ii.json",
   "./data/trabajadores.json",
   "./assets/logo-qberries.png",
   "./assets/icon-192.png",

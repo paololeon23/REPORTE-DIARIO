@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.11" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.11" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.15" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.15" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -146,8 +146,12 @@
         </div>
 
         <div class="totals" id="live-totals">
-          <span>0 jarras</span>
-          <span>0 kg</span>
+          <span id="lbl-jarras">0 jarras</span>
+          <label class="jarra-peso">
+            <small>Peso jarra</small>
+            <input id="inp-peso" inputmode="decimal" value="1.14" aria-label="Peso de jarra en kg" />
+          </label>
+          <span id="lbl-kg">0 kg</span>
         </div>
         <button type="button" class="btn-main" id="btn-save" disabled aria-disabled="true">Guardar lote</button>
       </section>
@@ -278,14 +282,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.11"></script>
-  <script src="js/catalog-lotes.js?v=2.1.11"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.11"></script>
-  <script src="js/catalog-plano.js?v=2.1.11"></script>
-  <script src="js/data.js?v=2.1.11"></script>
-  <script src="js/select.js?v=2.1.11"></script>
-  <script src="js/api.js?v=2.1.11"></script>
-  <script src="js/excel.js?v=2.1.11"></script>
-  <script src="js/app.js?v=2.1.11"></script>
+  <script src="js/config.js?v=2.1.15"></script>
+  <script src="js/catalog-lotes.js?v=2.1.15"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.15"></script>
+  <script src="js/catalog-plano.js?v=2.1.15"></script>
+  <script src="js/data.js?v=2.1.15"></script>
+  <script src="js/select.js?v=2.1.15"></script>
+  <script src="js/api.js?v=2.1.15"></script>
+  <script src="js/excel.js?v=2.1.15"></script>
+  <script src="js/app.js?v=2.1.15"></script>
 </body>
 </html>
