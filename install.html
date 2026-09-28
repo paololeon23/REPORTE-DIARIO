@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#FFFFFF" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Reporte KG" />
+  <title>Instalar Reporte KG</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <style>
+    :root { --green: #1B5E20; --muted: #5A6B5E; --line: #E3E8E4; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      min-height: 100dvh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(ellipse 80% 55% at 12% -10%, rgba(93, 178, 75, 0.22), transparent 55%),
+        linear-gradient(168deg, #F4FAF5 0%, #FFFFFF 55%);
+      color: var(--green);
+    }
+    body {
+      padding: 28px 18px calc(28px + env(safe-area-inset-bottom));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      width: min(420px, 100%);
+      background: #fff;
+      border-radius: 24px;
+      box-shadow: 0 14px 40px rgba(27, 94, 32, 0.12);
+      padding: 28px 22px 22px;
+      text-align: center;
+    }
+    .logo {
+      width: 72px; height: 72px; margin: 0 auto 14px;
+      border-radius: 18px; object-fit: cover;
+      box-shadow: 0 8px 20px rgba(27, 94, 32, 0.12);
+    }
+    .brand {
+      font-size: 0.7rem; font-weight: 800; letter-spacing: 0.14em;
+      color: #F7941D; margin-bottom: 8px;
+    }
+    h1 { font-size: 1.45rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin-bottom: 8px; }
+    .sub { font-size: 0.92rem; color: var(--muted); font-weight: 600; line-height: 1.45; margin-bottom: 18px; }
+    .status { font-size: 0.8rem; font-weight: 700; color: #2F8F46; margin-bottom: 14px; min-height: 1.2em; }
+    .status.warn { color: #9A6F12; }
+    .cta {
+      display: block; width: 100%; min-height: 56px; border: none; border-radius: 16px;
+      background: var(--green); color: #fff; font-size: 1.05rem; font-weight: 800; cursor: pointer;
+    }
+    .cta:disabled { opacity: 0.55; cursor: wait; }
+    .cta.secondary {
+      margin-top: 10px; background: #E8EEE9; color: var(--green); min-height: 48px;
+    }
+    .steps {
+      text-align: left; margin-top: 16px; padding: 14px;
+      background: #F3F8F4; border-radius: 16px;
+    }
+    .steps h2 {
+      font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    .steps ol { padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+    .steps li { font-size: 0.9rem; font-weight: 650; line-height: 1.35; color: #2C3330; }
+    .steps b { color: var(--green); }
+    .note { margin-top: 12px; font-size: 0.75rem; color: var(--muted); font-weight: 600; line-height: 1.4; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <img class="logo" src="assets/icon-192.png" alt="" width="72" height="72" />
+    <p class="brand">Q BERRIES</p>
+    <h1 id="title">Instalar Reporte KG</h1>
+    <p class="sub" id="lead">Pulsa instalar. En el aviso de Chrome, confirma y la app queda en tu pantalla de inicio.</p>
+    <p class="status" id="status">Preparando instalación…</p>
+    <button type="button" class="cta" id="btn-install" disabled>Instalar</button>
+    <button type="button" class="cta secondary" id="btn-open" hidden>Abrir la app</button>
+    <div class="steps" id="ios-box" hidden>
+      <h2>iPhone</h2>
+      <ol>
+        <li id="ios-safari">Si esto se abrió dentro de WhatsApp, toca <b>Safari</b> arriba a la derecha y vuelve a entrar.</li>
+        <li>Toca <b>Compartir</b> <span aria-hidden="true">□↑</span> (abajo en Safari).</li>
+        <li>Elige <b>Agregar a pantalla de inicio</b>.</li>
+        <li>Confirma <b>Agregar</b>. El ícono queda como app.</li>
+      </ol>
+    </div>
+    <p class="note" id="note">En Android usa Chrome. Si lo abriste desde WhatsApp, toca ⋮ → Abrir en Chrome.</p>
+  </div>
+  <script>
+    (function () {
+      var APP = "./index.html";
+      var deferred = null;
+      var statusEl = document.getElementById("status");
+      var titleEl = document.getElementById("title");
+      var leadEl = document.getElementById("lead");
+      var btn = document.getElementById("btn-install");
+      var btnOpen = document.getElementById("btn-open");
+      var iosBox = document.getElementById("ios-box");
+      var noteEl = document.getElementById("note");
+      var ua = navigator.userAgent || "";
+
+      function setStatus(msg, kind) {
+        statusEl.textContent = msg;
+        statusEl.className = "status" + (kind ? " " + kind : "");
+      }
+
+      function isIos() {
+        return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      }
+
+      function isInApp() {
+        return /WhatsApp|Instagram|FBAN|FBAV|FB_IAB|Line\/|TikTok/i.test(ua);
+      }
+
+      function isInstalled() {
+        try {
+          if (window.matchMedia("(display-mode: standalone)").matches) return true;
+          if (window.matchMedia("(display-mode: fullscreen)").matches) return true;
+          if (navigator.standalone === true) return true;
+        } catch (_) {}
+        return false;
+      }
+
+      function openApp() {
+        window.location.replace(APP);
+      }
+
+      function showIos() {
+        titleEl.textContent = "Cómo instalar en iPhone";
+        leadEl.textContent = "Safari no tiene botón Instalar. Sigue estos pasos y queda en la pantalla de inicio.";
+        statusEl.hidden = true;
+        btn.hidden = true;
+        noteEl.hidden = true;
+        iosBox.hidden = false;
+        var safari = document.getElementById("ios-safari");
+        if (safari && !isInApp()) safari.remove();
+      }
+
+      async function doInstall() {
+        if (isInstalled()) {
+          setStatus("Ya está instalada");
+          openApp();
+          return;
+        }
+        if (!deferred) {
+          setStatus("En Chrome: menú ⋮ → Instalar app", "warn");
+          btnOpen.hidden = false;
+          return;
+        }
+        btn.disabled = true;
+        setStatus("Abriendo el aviso de instalación…");
+        try {
+          deferred.prompt();
+          var choice = await deferred.userChoice;
+          deferred = null;
+          if (choice && choice.outcome === "accepted") {
+            setStatus("Instalada. Abriendo…");
+            setTimeout(openApp, 400);
+          } else {
+            setStatus("Instalación cancelada. Puedes intentar de nuevo.", "warn");
+            btn.disabled = false;
+          }
+        } catch (_) {
+          setStatus("En Chrome: menú ⋮ → Instalar app", "warn");
+          btn.disabled = false;
+          btnOpen.hidden = false;
+        }
+      }
+
+      btn.addEventListener("click", doInstall);
+      btnOpen.addEventListener("click", openApp);
+
+      if (isInstalled()) {
+        titleEl.textContent = "Ya está instalada";
+        leadEl.textContent = "Reporte KG ya está en este celular.";
+        statusEl.hidden = true;
+        btn.hidden = true;
+        btnOpen.hidden = false;
+        noteEl.hidden = true;
+        setTimeout(openApp, 600);
+        return;
+      }
+
+      if (isIos()) {
+        showIos();
+        return;
+      }
+
+      window.addEventListener("beforeinstallprompt", function (e) {
+        e.preventDefault();
+        deferred = e;
+        btn.disabled = false;
+        btn.textContent = "Instalar";
+        setStatus("Listo. Pulsa Instalar y confirma el aviso.");
+      });
+
+      window.addEventListener("appinstalled", function () {
+        deferred = null;
+        setStatus("Instalada. Abriendo…");
+        setTimeout(openApp, 300);
+      });
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./sw.js").catch(function () {});
+      }
+
+      setTimeout(function () {
+        if (deferred || isInstalled() || isIos()) return;
+        setStatus("Si el botón no responde: Chrome ⋮ → Instalar app", "warn");
+        btn.disabled = false;
+        btn.textContent = "Instalar";
+      }, 3500);
+    })();
+  </script>
+</body>
+</html>

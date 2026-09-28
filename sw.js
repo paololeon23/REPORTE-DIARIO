@@ -1,7 +1,8 @@
-const CACHE = "qb-cosecha-v123";
+const CACHE = "qb-cosecha-v135";
 const ASSETS = [
   "./",
   "./index.html",
+  "./install.html",
   "./css/fonts.css",
   "./css/styles.css",
   "./fonts/plus-jakarta-sans-500.woff2",
@@ -61,12 +62,6 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
-      .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
-      .then((clients) => {
-        clients.forEach((c) => {
-          if (c.url && c.navigate) c.navigate(c.url);
-        });
-      })
   );
 });
 
@@ -76,41 +71,38 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (/script\.google\.com|googleusercontent\.com/i.test(url.href)) return;
+
   const htmlNav = req.mode === "navigate" || url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
-  if (htmlNav) {
+  const code = /\.(js|css|html)$/i.test(url.pathname) || htmlNav;
+
+  if (code) {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          if (res.ok) {
-            const htmlA = res.clone();
-            const htmlB = res.clone();
-            caches.open(CACHE).then((c) => {
-              c.put("./index.html", htmlA);
-              c.put("./", htmlB);
-            });
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => caches.match("./index.html").then((h) => h || caches.match("./")))
+        .catch(() => caches.match(req).then((hit) => hit || caches.match("./index.html") || caches.match("./")))
     );
     return;
   }
+
   const asset = isStaticAsset(url);
   event.respondWith(
     caches.match(req).then((hit) => {
-      if (hit && !(asset && isHtmlResponse(hit))) return hit;
-      return fetch(req)
+      const fresh = fetch(req)
         .then((res) => {
-          if (res.ok && asset && !isHtmlResponse(res)) {
+          if (res && res.ok && asset && !isHtmlResponse(res)) {
             const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => {
-          if (asset) return hit || Response.error();
-          return caches.match("./index.html");
-        });
+        .catch(() => hit || Response.error());
+      return hit || fresh;
     })
   );
 });

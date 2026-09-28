@@ -13,36 +13,19 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.00" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.00" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.11" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.11" />
   <script>
     (function () {
-      function isLocalHost() {
-        var h = location.hostname || "";
-        return h === "127.0.0.1" || h === "localhost" || h === "::1";
-      }
       function allowMobileOrTablet() {
-        if (isLocalHost()) return true;
-        var ua = navigator.userAgent || "";
-        var touch = navigator.maxTouchPoints > 0 || "ontouchstart" in window;
-        if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Kindle|Silk/i.test(ua)) {
-          return true;
-        }
-        if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
-        var w = Math.min(window.innerWidth || 0, screen.width || 9999);
-        var h = Math.min(window.innerHeight || 0, screen.height || 9999);
+        var w = window.innerWidth || 0;
+        var h = window.innerHeight || 0;
         var shortSide = Math.min(w, h);
         var longSide = Math.max(w, h);
-        if (touch && shortSide <= 900 && longSide <= 1400) return true;
-        return false;
+        return shortSide >= 280 && shortSide <= 1024 && longSide <= 1400;
       }
       if (!allowMobileOrTablet()) {
         document.documentElement.classList.add("is-desktop");
-      } else {
-        document.addEventListener("DOMContentLoaded", function () {
-          var gate = document.getElementById("desktop-gate");
-          if (gate) gate.remove();
-        });
       }
     })();
   </script>
@@ -63,7 +46,7 @@
           <span class="dot"></span>
           <span class="chip-text">En línea</span>
         </div>
-        <button type="button" class="status-chip pending" id="chip-pending" title="Pendientes" hidden>
+        <button type="button" class="status-chip pending" id="chip-pending" title="Pendientes">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <path d="M12 16V8M8 11l4-4 4 4"/>
             <path d="M5 18h14a2 2 0 0 0 2-2v-1a4 4 0 0 0-3.2-3.9A6 6 0 0 0 6.1 9.2 4 4 0 0 0 5 13v3a2 2 0 0 0 2 2z" opacity=".35"/>
@@ -177,7 +160,6 @@
         <div class="hoy-actions">
           <button type="button" class="hoy-btn" id="btn-historial">Historial</button>
           <button type="button" class="hoy-btn dark" id="btn-sync">Sync</button>
-          <button type="button" class="hoy-btn" id="btn-wipe">Eliminar caché</button>
         </div>
         <div class="day-kpis" id="day-kpis"></div>
         <div class="lot-list" id="lot-list"></div>
@@ -195,8 +177,8 @@
     <div class="desktop-gate-inner">
       <img class="desktop-gate-logo" src="assets/logo-qberries.png" alt="Q Berries" width="88" height="88" />
       <p class="desktop-gate-brand">Q BERRIES</p>
-      <h1>Solo en celular o tablet</h1>
-      <p class="desktop-gate-lead">El reporte de cosecha está hecho para campo. En computadora no se puede usar.</p>
+      <h1>Solo celular o tablet</h1>
+      <p class="desktop-gate-lead">Esta ventana es muy grande. La app solo abre en tamaño de teléfono o tablet.</p>
       <div class="desktop-gate-devices" aria-hidden="true">
         <span class="desktop-gate-device phone">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
@@ -228,6 +210,7 @@
   <div class="qb-loader" id="qb-loader" hidden>
     <div class="qb-loader-card"><span class="qb-spinner"></span><p id="qb-loader-text">Guardando…</p></div>
   </div>
+  <div class="qb-toast" id="qb-toast" hidden role="status"></div>
   <div class="qb-fb" id="qb-fb" hidden>
     <div class="qb-fb-sheet">
       <strong id="qb-fb-title"></strong>
@@ -288,18 +271,21 @@
         <strong>Enviar / transferir</strong>
         <small>Mañana o turno completo</small>
       </button>
-      <button type="button" class="hoy-btn" id="btn-wipe">Eliminar caché</button>
+      <button type="button" class="sync-action" id="btn-wipe">
+        <strong>Eliminar caché</strong>
+        <small>Borra datos locales y carga la app limpia</small>
+      </button>
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.00"></script>
-  <script src="js/catalog-lotes.js?v=2.1.00"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.00"></script>
-  <script src="js/catalog-plano.js?v=2.1.00"></script>
-  <script src="js/data.js?v=2.1.00"></script>
-  <script src="js/select.js?v=2.1.00"></script>
-  <script src="js/api.js?v=2.1.00"></script>
-  <script src="js/excel.js?v=2.1.00"></script>
-  <script src="js/app.js?v=2.1.00"></script>
+  <script src="js/config.js?v=2.1.11"></script>
+  <script src="js/catalog-lotes.js?v=2.1.11"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.11"></script>
+  <script src="js/catalog-plano.js?v=2.1.11"></script>
+  <script src="js/data.js?v=2.1.11"></script>
+  <script src="js/select.js?v=2.1.11"></script>
+  <script src="js/api.js?v=2.1.11"></script>
+  <script src="js/excel.js?v=2.1.11"></script>
+  <script src="js/app.js?v=2.1.11"></script>
 </body>
 </html>

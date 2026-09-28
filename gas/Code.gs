@@ -59,17 +59,19 @@ function doPost(e) {
     var result = upsertBatch_(sh, recs, headers);
     SpreadsheetApp.flush();
 
-    if (result.changed && result.deltas && result.deltas.length) {
-      try { applyMergeDeltas_(result.deltas); } catch (mergeErr) {}
-    }
-
-    return jsonOut_({
+    var response = {
       ok: true,
       accepted: result.accepted || [],
       existing: result.existing || [],
       saved: (result.accepted || []).length + (result.existing || []).length,
       flushed: true
-    });
+    };
+
+    if (result.changed && result.deltas && result.deltas.length) {
+      try { applyMergeDeltas_(result.deltas); } catch (mergeErr) {}
+    }
+
+    return jsonOut_(response);
   } catch (err) {
     return jsonOut_({ ok: false, error: String(err) });
   } finally {
@@ -80,11 +82,6 @@ function doPost(e) {
 /** Tira la cola anterior. No la aplica: solo cuenta el POST actual. */
 function dropMergeQueue_() {
   try { PropertiesService.getScriptProperties().deleteProperty('qb_merge_queue'); } catch (e0) {}
-  try {
-    ScriptApp.getProjectTriggers().forEach(function (t) {
-      if (t.getHandlerFunction() === 'runQueuedMerge_') ScriptApp.deleteTrigger(t);
-    });
-  } catch (e1) {}
 }
 
 function applyMergeDeltas_(deltas) {

@@ -451,12 +451,8 @@ APP.API = (() => {
       ep,
       {
         method: "POST",
-        cache: "no-store",
-        headers: {
-          "Content-Type": "text/plain;charset=utf-8",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-        },
+        redirect: "follow",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
         body,
       },
       rebuild ? 55000 : SEND_TIMEOUT

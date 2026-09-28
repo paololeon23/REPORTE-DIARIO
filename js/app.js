@@ -60,34 +60,43 @@ APP.App = (() => {
   function feedback(title, text, opts) {
     return new Promise((resolve) => {
       const root = $("#qb-fb");
-      $("#qb-fb-title").textContent = title;
+      const head = $("#qb-fb-title");
       const line = $("#qb-fb-text");
+      const actions = $("#qb-fb-actions");
+      if (!root || !head || !line || !actions) {
+        resolve(true);
+        return;
+      }
+      head.textContent = title || "";
       if (opts && opts.html) line.innerHTML = text || "";
       else line.textContent = text || "";
       line.classList.toggle("is-detail", !!(opts && opts.html));
-      const actions = $("#qb-fb-actions");
       actions.innerHTML = "";
       const ok = document.createElement("button");
       ok.textContent = "Listo";
-      ok.onclick = () => {
+      const close = () => {
         root.hidden = true;
         resolve(true);
       };
+      ok.onclick = close;
       actions.appendChild(ok);
       root.hidden = false;
-      setTimeout(() => {
-        root.hidden = true;
-        resolve(true);
-      }, (opts && opts.ms) || 1600);
+      setTimeout(close, (opts && opts.ms) || 1600);
     });
   }
 
   function ask(title, text, okLabel) {
     return new Promise((resolve) => {
       const root = $("#qb-fb");
-      $("#qb-fb-title").textContent = title;
-      $("#qb-fb-text").textContent = text || "";
+      const head = $("#qb-fb-title");
+      const body = $("#qb-fb-text");
       const actions = $("#qb-fb-actions");
+      if (!root || !head || !body || !actions) {
+        resolve(false);
+        return;
+      }
+      head.textContent = title || "";
+      body.textContent = text || "";
       actions.innerHTML = "";
       const cancel = document.createElement("button");
       cancel.textContent = "Cancelar";
@@ -632,7 +641,7 @@ APP.App = (() => {
             const ok = await ask(
               "Cambiar supervisor",
               n
-                ? "Se borrarán los lotes de hoy de este supervisor en el celular (para no cargar la app). El historial Excel no se toca. ¿Seguro?"
+                ? "Se elimina el día de este supervisor en el celular (lotes de hoy). El historial no se toca. ¿Seguro?"
                 : "Vas a cambiar de supervisor. El historial no se toca. ¿Seguro?",
               "Cambiar"
             );
@@ -822,7 +831,6 @@ APP.App = (() => {
     click("#btn-hist-back", closeHistorial);
     click("#btn-sync", openSync);
     click("#btn-sync-close", closeSync);
-    click("#btn-wipe", () => wipeCache());
     on("#qb-sync", "click", (e) => {
       if (e.target === $("#qb-sync")) closeSync();
     });
@@ -1120,9 +1128,13 @@ APP.App = (() => {
   }
 
   async function wipeCache() {
-    closeSync();
-    const ok = await ask("Eliminar caché", "Se borra todo lo local, pendientes y borradores. La app queda limpia.", "Borrar");
+    const ok = await ask(
+      "Eliminar caché",
+      "¿Seguro que quieres eliminar todo el caché? Se borra lo guardado en el celular y la app se carga limpia.",
+      "Sí, eliminar"
+    );
     if (!ok) return;
+    closeSync();
     APP.API.wipeLocal();
     try {
       if ("serviceWorker" in navigator) {
@@ -1264,6 +1276,7 @@ APP.App = (() => {
         summary: totalTxt,
         records: queue,
       });
+      paintStatus();
 
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         if (!auto) {
@@ -1283,6 +1296,7 @@ APP.App = (() => {
       });
       paintDay();
       paintHistorial();
+      paintStatus();
 
       if (result.reason === "no-ep" || result.reason === "offline" || result.reason === "net" || result.reason === "http" || result.reason === "partial") {
         if (!auto) {
@@ -1336,14 +1350,14 @@ APP.App = (() => {
         paintDay();
         paintHistorial();
         paintStatus();
-        await feedback("Tarde enviada", `Listo: ${totalTxt}. Se limpió solo el día de este supervisor. El historial se mantiene.`, auto ? { ms: 2200 } : undefined);
+      toast("Se envió.");
         return;
       }
 
       rememberExcel(null, "Mañana");
       paintHistorial();
       paintStatus();
-      await feedback("Mañana enviada", `Listo: ${totalTxt}. El turno pasó a Tarde.`, auto ? { ms: 2200 } : undefined);
+      toast("Se envió.");
     } catch (e) {
       hideLoader();
       paintStatus();
@@ -1431,6 +1445,16 @@ APP.App = (() => {
     exportDownload();
   }
 
+  function toast(text, warn) {
+    const el = $("#qb-toast");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("is-warn", !!warn);
+    el.hidden = false;
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { el.hidden = true; }, 2200);
+  }
+
   function paintStatus() {
     const on = navigator.onLine;
     document.querySelectorAll("#chip-online, [data-chip-online]").forEach((el) => {
@@ -1439,8 +1463,13 @@ APP.App = (() => {
       const text = el.querySelector(".chip-text");
       if (text) text.textContent = on ? "En línea" : "Sin red";
     });
+    const n = APP.API.pendingCount();
+    document.querySelectorAll("#chip-pending-text, [data-chip-pending-text]").forEach((el) => {
+      el.textContent = n === 1 ? "1 pend." : n + " pend.";
+    });
     document.querySelectorAll("#chip-pending, [data-chip-pending]").forEach((el) => {
-      el.hidden = true;
+      el.hidden = false;
+      el.classList.toggle("has-items", n > 0);
     });
   }
 
@@ -1483,8 +1512,17 @@ APP.App = (() => {
     if (root) root.hidden = true;
   }
 
+  function wantsForcedInstall() {
+    try {
+      return new URLSearchParams(location.search || "").get("instalar") === "1";
+    } catch (_) {
+      return false;
+    }
+  }
+
   function showInstall() {
-    if (isAppInstalled() || installDismissed()) return;
+    if (isAppInstalled()) return;
+    if (installDismissed() && !wantsForcedInstall()) return;
     const root = $("#qb-install");
     if (!root) return;
     const ios = isIosBrowser();
@@ -1541,7 +1579,7 @@ APP.App = (() => {
     window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
       deferredInstall = e;
-      if (!installDismissed()) showInstall();
+      if (!installDismissed() || wantsForcedInstall()) showInstall();
     });
     window.addEventListener("appinstalled", () => {
       deferredInstall = null;
@@ -1561,46 +1599,37 @@ APP.App = (() => {
       });
     }
     setTimeout(() => {
-      if (!isAppInstalled() && !installDismissed()) showInstall();
+      if (!isAppInstalled() && (!installDismissed() || wantsForcedInstall())) showInstall();
     }, 1200);
   }
 
   function allowMobileOrTablet() {
-    const host = location.hostname || "";
-    if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
-    const ua = navigator.userAgent || "";
-    const touch = navigator.maxTouchPoints > 0 || "ontouchstart" in window;
-    if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|Tablet|Kindle|Silk/i.test(ua)) {
-      return true;
-    }
-    if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return true;
-    const w = Math.min(window.innerWidth || 0, screen.width || 9999);
-    const h = Math.min(window.innerHeight || 0, screen.height || 9999);
-    if (touch && Math.min(w, h) <= 900 && Math.max(w, h) <= 1400) return true;
-    return false;
+    const w = window.innerWidth || 0;
+    const h = window.innerHeight || 0;
+    const shortSide = Math.min(w, h);
+    const longSide = Math.max(w, h);
+    return shortSide >= 280 && shortSide <= 1024 && longSide <= 1400;
   }
 
   function setDesktopGate(on) {
     const gate = document.getElementById("desktop-gate");
     if (!gate) return;
     if (on) {
+      gate.hidden = false;
       gate.removeAttribute("inert");
       gate.setAttribute("aria-hidden", "false");
       return;
     }
-    gate.remove();
+    gate.hidden = true;
+    gate.setAttribute("inert", "");
+    gate.setAttribute("aria-hidden", "true");
   }
 
-  function init() {
-    if (!allowMobileOrTablet()) {
-      document.documentElement.classList.add("is-desktop");
-      document.body.classList.add("is-desktop");
-      setDesktopGate(true);
-      return;
-    }
-    document.documentElement.classList.remove("is-desktop");
-    document.body.classList.remove("is-desktop");
-    setDesktopGate(false);
+  let appReady = false;
+
+  function bootApp() {
+    if (appReady) return;
+    appReady = true;
     loadSession();
     APP.API.pruneOldRecords();
     paintPeople();
@@ -1646,6 +1675,27 @@ APP.App = (() => {
         location.reload();
       });
     }
+  }
+
+  function applySizeGate() {
+    const ok = allowMobileOrTablet();
+    document.documentElement.classList.toggle("is-desktop", !ok);
+    document.body.classList.toggle("is-desktop", !ok);
+    setDesktopGate(!ok);
+    if (ok) bootApp();
+  }
+
+  function init() {
+    applySizeGate();
+    let sizeTimer = 0;
+    window.addEventListener("resize", () => {
+      clearTimeout(sizeTimer);
+      sizeTimer = setTimeout(applySizeGate, 120);
+    });
+    window.addEventListener("orientationchange", () => setTimeout(applySizeGate, 180));
+    setTimeout(() => {
+      if (appReady && !isAppInstalled() && (!installDismissed() || wantsForcedInstall())) showInstall();
+    }, 1200);
   }
 
   document.addEventListener("DOMContentLoaded", init);
