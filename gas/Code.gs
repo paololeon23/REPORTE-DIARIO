@@ -810,9 +810,10 @@ function dayRowKey_(row) {
 }
 
 function readDaySheetRows_(sh) {
+  if (!sh) return [];
   var cols = RESUMEN_HEADERS.length;
   var last = sh.getLastRow();
-  // Fila 1 = encabezado, última = TOTAL → datos = last - 2 filas.
+  // Hoja nueva o solo encabezado + TOTAL: 0 datos. No se lee nada más.
   var nData = last - 2;
   if (nData < 1) return [];
   var data = sh.getRange(2, 1, nData, cols).getValues();
@@ -926,7 +927,11 @@ function mergeDaysFromDeltas_(ss, headers, deltas, logSh) {
         seen[k] = true;
         out.push(map[k]);
       });
-      if (!out.length) return;
+      if (!out.length) {
+        // El día queda en 0: se vacía su hoja. No se copia el día anterior ni una cola vieja.
+        if (existing) writeDaySheet_(existing, []);
+        return;
+      }
       var sh = existing || daySheet_(ss, iso, etapa, true);
       if (sh) writeDaySheet_(sh, out);
     });

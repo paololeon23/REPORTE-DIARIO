@@ -1680,6 +1680,13 @@ APP.App = (() => {
 
   let appReady = false;
 
+  function hideBoot() {
+    const boot = document.getElementById("boot");
+    if (!boot || boot.classList.contains("is-out")) return;
+    boot.classList.add("is-out");
+    setTimeout(() => boot.remove(), 400);
+  }
+
   function bootApp() {
     if (appReady) return;
     appReady = true;
@@ -1720,6 +1727,7 @@ APP.App = (() => {
         .catch(() => {});
     }
     window.addEventListener("app:catalogs", paintPeople);
+    hideBoot();
     if ("serviceWorker" in navigator && /^https?:$/i.test(location.protocol)) {
       navigator.serviceWorker.register("./sw.js?v=" + (APP.CONFIG.VERSION || "")).catch(() => {});
       navigator.serviceWorker.addEventListener("controllerchange", () => {
@@ -1736,6 +1744,7 @@ APP.App = (() => {
     document.body.classList.toggle("is-desktop", !ok);
     setDesktopGate(!ok);
     if (ok) bootApp();
+    else hideBoot();
   }
 
   function init() {

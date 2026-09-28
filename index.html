@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.15" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.15" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.17" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.17" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -29,8 +29,68 @@
       }
     })();
   </script>
+  <style>
+    .boot {
+      position: fixed;
+      inset: 0;
+      z-index: 120;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background: #fff;
+    }
+    .boot-mark {
+      position: relative;
+      width: 112px;
+      height: 112px;
+      display: grid;
+      place-items: center;
+    }
+    .boot-mark img {
+      width: 76px;
+      height: 76px;
+      object-fit: contain;
+      position: relative;
+      z-index: 1;
+    }
+    .boot-mark::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 3px solid #E6F0E8;
+      border-top-color: #1B5E20;
+      animation: bootspin 0.8s linear infinite;
+    }
+    .boot strong {
+      margin: 0;
+      font: 800 12px/1 system-ui, -apple-system, sans-serif;
+      letter-spacing: 0.18em;
+      color: #F7941D;
+    }
+    .boot small {
+      font: 600 15px/1 system-ui, -apple-system, sans-serif;
+      color: #6B7570;
+    }
+    .boot.is-out {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.35s ease, visibility 0.35s;
+    }
+    @keyframes bootspin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
+  <div class="boot" id="boot">
+    <div class="boot-mark">
+      <img src="assets/logo-qberries%20-%20copia.png" alt="Q Berries" width="76" height="76" />
+    </div>
+    <strong>Q BERRIES</strong>
+    <small>Iniciando…</small>
+  </div>
   <div class="app">
     <header class="corp-header">
       <div class="corp-left">
@@ -282,14 +342,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.15"></script>
-  <script src="js/catalog-lotes.js?v=2.1.15"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.15"></script>
-  <script src="js/catalog-plano.js?v=2.1.15"></script>
-  <script src="js/data.js?v=2.1.15"></script>
-  <script src="js/select.js?v=2.1.15"></script>
-  <script src="js/api.js?v=2.1.15"></script>
-  <script src="js/excel.js?v=2.1.15"></script>
-  <script src="js/app.js?v=2.1.15"></script>
+  <script src="js/config.js?v=2.1.17"></script>
+  <script src="js/catalog-lotes.js?v=2.1.17"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.17"></script>
+  <script src="js/catalog-plano.js?v=2.1.17"></script>
+  <script src="js/data.js?v=2.1.17"></script>
+  <script src="js/select.js?v=2.1.17"></script>
+  <script src="js/api.js?v=2.1.17"></script>
+  <script src="js/excel.js?v=2.1.17"></script>
+  <script src="js/app.js?v=2.1.17"></script>
 </body>
 </html>

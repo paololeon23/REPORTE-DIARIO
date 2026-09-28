@@ -1,4 +1,4 @@
-const CACHE = "qb-cosecha-v139";
+const CACHE = "qb-cosecha-v141";
 const ASSETS = [
   "./",
   "./index.html",
@@ -25,6 +25,7 @@ const ASSETS = [
   "./data/plano-cosecha-etapa-ii.json",
   "./data/trabajadores.json",
   "./assets/logo-qberries.png",
+  "./assets/logo-qberries - copia.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/apple-touch-icon.png",
@@ -78,15 +79,22 @@ self.addEventListener("fetch", (event) => {
 
   if (code) {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match(req).then((hit) => hit || caches.match("./index.html") || caches.match("./")))
+      caches.match(req).then((cached) => {
+        const refresh = fetch(req)
+          .then((res) => {
+            if (res && res.ok && (htmlNav || !isHtmlResponse(res))) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+            }
+            return res;
+          })
+          .catch(() => cached || caches.match("./index.html") || caches.match("./"));
+        if (cached) return cached;
+        if (htmlNav) {
+          return caches.match("./index.html").then((page) => page || caches.match("./").then((root) => root || refresh));
+        }
+        return refresh;
+      })
     );
     return;
   }
