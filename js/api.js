@@ -408,8 +408,11 @@ APP.API = (() => {
     if (!String(data.supervisor || "").trim()) {
       data.supervisor = session.supervisorNombre || "";
     }
-    if (isTodayClosed(data.supervisorDni)) return { ok: false, reason: "closed" };
-    data.fecha = todayKey();
+    const fechaCierre = String(data.fecha || "");
+    const cierre = data.cierre === true && /^\d{4}-\d{2}-\d{2}$/.test(fechaCierre) && fechaCierre <= todayKey();
+    if (!cierre && isTodayClosed(data.supervisorDni)) return { ok: false, reason: "closed" };
+    if (!cierre) data.fecha = todayKey();
+    delete data.cierre;
     data.horaEnvio = limaDateTime();
     const prev = all().find((r) => sameLoteDay(r, data));
     data.horaRegistro = (prev && prev.horaRegistro) || data.horaRegistro || limaTime();
@@ -429,6 +432,26 @@ APP.API = (() => {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ms);
     return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+  }
+
+  let openLotsAt = 0;
+  let openLotsItems = [];
+
+  async function openLots(force) {
+    const ep = endpoint();
+    if (!ep) return openLotsItems;
+    if (!force && openLotsAt && Date.now() - openLotsAt < 20000) return openLotsItems;
+    try {
+      const sep = ep.includes("?") ? "&" : "?";
+      const res = await fetchTimeout(ep + sep + "abiertos=1", { method: "GET", cache: "no-store" }, 12000);
+      const text = await res.text();
+      const json = JSON.parse(text);
+      if (json && json.ok && Array.isArray(json.items)) {
+        openLotsItems = json.items;
+        openLotsAt = Date.now();
+      }
+    } catch (_) {}
+    return openLotsItems;
   }
 
   async function probe() {
@@ -866,6 +889,7 @@ APP.API = (() => {
     submit,
     flush,
     probe,
+    openLots,
     loadSession,
     saveSession,
     listHistory,

@@ -23,6 +23,7 @@ APP.App = (() => {
     china: false,
     jarrasConv: "",
     jarrasChina: "",
+    openLots: [],
     saving: false,
     transferring: false,
   };
@@ -242,7 +243,21 @@ APP.App = (() => {
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
 
+  function avanceParaGuardar() {
+    return state.avance || "";
+  }
+
+  function faltaHa() {
+    if (!state.cierre) return null;
+    const area = Number(state.cierre.area) || 0;
+    const sum = Number(state.cierre.avance) || 0;
+    const mine = Number(state.cierre.mio) || 0;
+    const typed = Number(state.avance) || 0;
+    return Math.round((area - (sum - mine) - typed) * 1000) / 1000;
+  }
+
   function avanceFloor() {
+    if (state.cierre) return 0;
     if (!isTarde() || !state.lote) return 0;
     return morningAvanceOf(state.lote.lote);
   }
@@ -250,6 +265,16 @@ APP.App = (() => {
   function paintAvanceHint() {
     const hint = $("#avance-min");
     if (!hint) return;
+    if (state.cierre) {
+      const left = faltaHa();
+      hint.hidden = false;
+      hint.classList.add("is-gap");
+      if (left > 0) hint.textContent = `Falta ${left} ha`;
+      else if (left < 0) hint.textContent = `Supera el área por ${Math.abs(left)} ha`;
+      else hint.textContent = "Con esto se completa el área";
+      return;
+    }
+    hint.classList.remove("is-gap");
     const floor = avanceFloor();
     if (floor > 0) {
       hint.hidden = false;
@@ -339,14 +364,15 @@ APP.App = (() => {
     const jConv = state.conv ? Number(state.jarrasConv) || 0 : 0;
     const jChina = state.china ? Number(state.jarrasChina) || 0 : 0;
     return {
-      fecha: today(),
+      fecha: state.cierre && state.cierre.fecha ? state.cierre.fecha : today(),
+      cierre: !!(state.cierre && state.cierre.fecha),
       lote: L.lote || "",
       fundo: canonFundo(state.session.fundo) || L.fundo || "",
       variedad: L.variedad || "",
       md: L.md || "",
       turno: L.turno || "",
       area: L.area || "",
-      avance: state.avance || "",
+      avance: avanceParaGuardar(),
       jarrasConv: jConv,
       jarrasChina: jChina,
       kgConv: 0,
@@ -488,6 +514,80 @@ APP.App = (() => {
         removeLote(b.dataset.del, b.dataset.tc, b.dataset.fundo);
       };
     });
+    paintOpenLots();
+    refreshOpenLots();
+  }
+
+  function haTxt(n) {
+    const x = Math.round(Number(n) * 1000) / 1000;
+    return Number.isFinite(x) ? String(x) : "—";
+  }
+
+  function paintOpenLots() {
+    const box = $("#open-lots");
+    if (!box) return;
+    const list = state.openLots || [];
+    if (!list.length) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = `<p class="open-lots-title">Sin terminar · todos</p>` + list.map((r, i) => {
+      const tag = (r.fecha ? String(r.fecha).slice(8, 10) + "/" + String(r.fecha).slice(5, 7) : "") + " · toca para terminar";
+      const body = `
+        <b>Lote ${esc(r.lote)}</b>
+        <span>avance ${esc(haTxt(r.avance))}</span>
+        <span>área ${esc(haTxt(r.area))}</span>
+        <small>${esc([tag, r.supervisor, r.fundo].filter(Boolean).join(" · "))}</small>`;
+      return r.puede
+        ? `<button type="button" class="open-lot" data-open="${i}">${body}</button>`
+        : `<article class="open-lot">${body}</article>`;
+    }).join("");
+    box.querySelectorAll("[data-open]").forEach((btn) => {
+      btn.onclick = () => startCierre(list[Number(btn.dataset.open)]);
+    });
+  }
+
+  function refreshOpenLots(force) {
+    if (!navigator.onLine || !APP.API.openLots) return;
+    APP.API.openLots(!!force).then((items) => {
+      state.openLots = Array.isArray(items) ? items : [];
+      paintOpenLots();
+    }).catch(() => {});
+  }
+
+  function startCierre(item) {
+    if (!item || !item.puede || !item.fecha) return;
+    const L = APP.Data.findLote(item.lote, item.fundo) || {
+      lote: item.lote,
+      fundo: item.fundo,
+      modulo: item.modulo || "",
+      md: item.modulo || "",
+      turno: item.turno || "",
+      variedad: "",
+      etapa: "",
+    };
+    L.area = item.area;
+    const dni = supDni();
+    const mine = (item.partes || []).reduce((sum, p) => sum + (String(p.dni || "") === dni ? Number(p.avance) || 0 : 0), 0);
+    state.cierre = {
+      fecha: item.fecha,
+      avance: Number(item.avance) || 0,
+      area: Number(item.area) || 0,
+      mio: mine,
+    };
+    if (item.fundo) state.session.fundo = canonFundo(item.fundo) || state.session.fundo;
+    persistSession();
+    paintPeople({ keepTurno: true });
+    fillLoteForm(L, null);
+    state.avance = "";
+    const inp = $("#inp-avance");
+    if (inp) inp.value = "";
+    paintLote();
+    paintAvanceHint();
+    const card = $("#lote-card");
+    if (card) card.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   async function removeLote(loteId, turnoCampo, fundo) {
@@ -538,6 +638,7 @@ APP.App = (() => {
     state.china = false;
     state.jarrasConv = "";
     state.jarrasChina = "";
+    state.cierre = null;
     $("#inp-avance").value = "";
     $("#inp-jconv").value = "";
     $("#inp-jchina").value = "";
@@ -626,6 +727,7 @@ APP.App = (() => {
       rememberExcel();
       resetLoteInputs();
       paintDay();
+      refreshOpenLots(true);
       paintStatus();
       hideLoader();
       feedback(
@@ -746,6 +848,7 @@ APP.App = (() => {
             .sort((a, b) => Number(!!b.marked) - Number(!!a.marked));
         },
         onSelect: (opt) => {
+          state.cierre = null;
           const L = opt.lote || APP.Data.findLote(opt.id, fundo);
           if (!L) return;
           const tarde = APP.API.recordOf(L.lote, today(), "Tarde", supDni(), fundo);

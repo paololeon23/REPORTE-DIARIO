@@ -21,16 +21,11 @@ var RESP_HEADERS = [
 var ACUM = 'Acumulado';
 var ACUM_HEADERS = [
   'Fecha', 'Semana', 'Supervisor', 'Supervisor DNI', 'Turno campo',
-  'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Área',
+  'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Avance', 'Área',
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
   'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
-var ACUM_HEADERS = [
-  'Fecha', 'Semana', 'Supervisor', 'Supervisor DNI', 'Turno campo',
-  'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Área',
-  'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
-  'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
-];
+var GAP_RED = '#F4C7C3';
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -39,6 +34,9 @@ function jsonOut_(obj) {
 function doGet(e) {
   if (e && e.parameter && e.parameter.ping) return jsonOut_({ ok: true, pong: true });
   if (e && e.parameter && e.parameter.test === '1') return jsonOut_(runSaveSelfTest_());
+  if (e && e.parameter && (e.parameter.abiertos === '1' || e.parameter.incompletos === '1')) {
+    return jsonOut_(openLotsToday_());
+  }
   return jsonOut_({ ok: true });
 }
 
@@ -1394,6 +1392,189 @@ function dropReporteSheets_(ss) {
     }
   });
 }
+function headerCol_(have, names) {
+  var i;
+  var n;
+  for (i = 0; i < names.length; i++) {
+    n = have.indexOf(names[i]);
+    if (n >= 0) return n;
+  }
+  return -1;
+}
+
+/** Área sola era el avance. Avance queda en K y el área real en la columna de la derecha. */
+function ensureAvanceAreaCols_(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  var iAv = headerCol_(have, ['Avance']);
+  var iArea = headerCol_(have, ['Área', 'Area']);
+  if (iAv < 0 && iArea >= 0) {
+    sh.getRange(1, iArea + 1).setValue('Avance');
+    sh.insertColumnAfter(iArea + 1);
+    sh.getRange(1, iArea + 2).setValue('Área');
+    return;
+  }
+  if (iAv >= 0 && iArea < 0) {
+    sh.insertColumnAfter(iAv + 1);
+    sh.getRange(1, iAv + 2).setValue('Área');
+  }
+}
+
+function addDaysIso_(iso, days) {
+  var p = String(iso || '').split('-');
+  if (p.length < 3) return '';
+  var d = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+  d.setUTCDate(d.getUTCDate() + Number(days || 0));
+  var y = d.getUTCFullYear();
+  var m = ('0' + (d.getUTCMonth() + 1)).slice(-2);
+  var day = ('0' + d.getUTCDate()).slice(-2);
+  return y + '-' + m + '-' + day;
+}
+
+function lotGap_(avance, area) {
+  var av = num(avance);
+  var ar = num(area);
+  return ar > 0 && av + 0.0005 < ar;
+}
+
+function paintGapCells_(sh, col, rows, color) {
+  if (!rows.length || col < 1) return;
+  rows.sort(function (a, b) { return a - b; });
+  var start = rows[0];
+  var prev = rows[0];
+  var i;
+  function flush(from, to) {
+    sh.getRange(from, col, to - from + 1, 1).setBackground(color);
+  }
+  for (i = 1; i < rows.length; i++) {
+    if (rows[i] === prev + 1) {
+      prev = rows[i];
+      continue;
+    }
+    flush(start, prev);
+    start = prev = rows[i];
+  }
+  flush(start, prev);
+}
+
+function paintTodayAcumGaps_(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var width = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, width).getValues()[0];
+  var cFecha = headerCol_(have, ['Fecha']) + 1;
+  var cLote = headerCol_(have, ['Lote']) + 1;
+  var cAv = headerCol_(have, ['Avance']) + 1;
+  var cAr = headerCol_(have, ['Área', 'Area']) + 1;
+  if (cFecha < 1 || cLote < 1 || cAv < 1 || cAr < 1) return;
+  var cFundo = headerCol_(have, ['Fundo']) + 1;
+  var n = last - 1;
+  var fechas = sh.getRange(2, cFecha, n, 1).getValues();
+  var lotes = sh.getRange(2, cLote, n, 1).getValues();
+  var fundos = cFundo > 0 ? sh.getRange(2, cFundo, n, 1).getValues() : [];
+  var avs = sh.getRange(2, cAv, n, 1).getValues();
+  var ars = sh.getRange(2, cAr, n, 1).getValues();
+  var groups = {};
+  var i;
+  var f;
+  var key;
+  for (i = 0; i < n; i++) {
+    f = toIsoFecha_(fechas[i][0]);
+    if (!f) continue;
+    key = f + '|' + String(lotes[i][0] || '').trim() + '|' + String(cFundo > 0 ? fundos[i][0] : '').toUpperCase();
+    if (!groups[key]) groups[key] = { rows: [], avance: 0, area: 0 };
+    groups[key].rows.push(i + 2);
+    groups[key].avance += num(avs[i][0]);
+    groups[key].area = Math.max(groups[key].area, num(ars[i][0]));
+  }
+  var red = [];
+  var clear = [];
+  Object.keys(groups).forEach(function (k) {
+    var g = groups[k];
+    var dest = lotGap_(g.avance, g.area) ? red : clear;
+    g.rows.forEach(function (row) { dest.push(row); });
+  });
+  [cLote, cAv, cAr].forEach(function (col) {
+    paintGapCells_(sh, col, red.slice(), GAP_RED);
+    paintGapCells_(sh, col, clear.slice(), '#FFFFFF');
+  });
+}
+
+function openLotsToday_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(ACUM);
+  var iso = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  if (!sh || sh.getLastRow() < 2) return { ok: true, fecha: iso, items: [] };
+  var width = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, width).getValues()[0];
+  var cFecha = headerCol_(have, ['Fecha']);
+  var cSup = headerCol_(have, ['Supervisor']);
+  var cDni = headerCol_(have, ['Supervisor DNI']);
+  var cTc = headerCol_(have, ['Turno campo']);
+  var cFundo = headerCol_(have, ['Fundo']);
+  var cMod = headerCol_(have, ['Módulo', 'Modulo']);
+  var cLote = headerCol_(have, ['Lote']);
+  var cTurno = headerCol_(have, ['Turno']);
+  var cAv = headerCol_(have, ['Avance']);
+  var cAr = headerCol_(have, ['Área', 'Area']);
+  if (cFecha < 0 || cLote < 0 || cAv < 0 || cAr < 0) return { ok: true, fecha: iso, items: [] };
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, width).getValues();
+  var groups = {};
+  var order = [];
+  data.forEach(function (row) {
+    var f = toIsoFecha_(row[cFecha]);
+    if (!f || f > iso) return;
+    var lote = String(row[cLote] || '').trim();
+    var fundo = cFundo >= 0 ? String(row[cFundo] || '').trim() : '';
+    var key = f + '|' + lote + '|' + fundo.toUpperCase();
+    if (!groups[key]) {
+      groups[key] = {
+        fecha: f,
+        lote: lote,
+        fundo: fundo,
+        modulo: cMod >= 0 ? String(row[cMod] || '').trim() : '',
+        turno: cTurno >= 0 ? String(row[cTurno] || '').replace(/^T/i, '').trim() : '',
+        area: 0,
+        avance: 0,
+        nombres: [],
+        partes: []
+      };
+      order.push(key);
+    }
+    var g = groups[key];
+    var avance = num(row[cAv]);
+    var dni = cDni >= 0 ? String(row[cDni] || '').replace(/\D/g, '').slice(0, 8) : '';
+    var nombre = cSup >= 0 ? String(row[cSup] || '').trim() : '';
+    g.avance += avance;
+    g.area = Math.max(g.area, num(row[cAr]));
+    if (nombre && g.nombres.indexOf(nombre) < 0) g.nombres.push(nombre);
+    g.partes.push({ dni: dni, avance: Math.round(avance * 1000) / 1000 });
+  });
+  var items = [];
+  order.forEach(function (key) {
+    var g = groups[key];
+    if (!lotGap_(g.avance, g.area)) return;
+    items.push({
+      fecha: g.fecha,
+      lote: g.lote,
+      avance: Math.round(g.avance * 1000) / 1000,
+      area: Math.round(g.area * 1000) / 1000,
+      supervisor: g.nombres.join(', '),
+      turno: g.turno,
+      fundo: g.fundo,
+      modulo: g.modulo,
+      partes: g.partes,
+      puede: true
+    });
+  });
+  items.sort(function (a, b) {
+    var c = String(a.fecha).localeCompare(String(b.fecha));
+    return c || String(a.lote).localeCompare(String(b.lote), 'es', { numeric: true });
+  });
+  return { ok: true, fecha: iso, items: items };
+}
+
 function ensureAcumuladoSheet_(ss) {
   ss = ss || SpreadsheetApp.getActive();
   var sh = ss.getSheetByName(ACUM);
@@ -1401,13 +1582,15 @@ function ensureAcumuladoSheet_(ss) {
     sh = ss.insertSheet(ACUM);
     placeAfterResponsables_(ss, sh);
   }
+  if (sh.getLastRow() > 0) ensureAvanceAreaCols_(sh);
   if (sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, ACUM_HEADERS.length).setValues([ACUM_HEADERS]);
   } else {
     var lastCol = Math.max(sh.getLastColumn(), 1);
     var have = sh.getRange(1, 1, 1, lastCol).getValues()[0];
     ACUM_HEADERS.forEach(function (name) {
-      if (have.indexOf(name) === -1) {
+      var exists = name === 'Área' ? headerCol_(have, ['Área', 'Area']) >= 0 : have.indexOf(name) !== -1;
+      if (!exists) {
         sh.getRange(1, have.length + 1).setValue(name);
         have.push(name);
       }
@@ -1426,7 +1609,10 @@ function ensureAcumuladoSheet_(ss) {
 
 function acumuladoRowFromLog_(row, headers) {
   var iso = toIsoFecha_(cell_(row, headers, 'Fecha'));
-  var area = areaFromLogRow_(row, headers);
+  var avance = num(cell_(row, headers, 'Avance'));
+  var areaReal = num(cell_(row, headers, 'Area'));
+  if (!(avance > 0)) avance = areaReal;
+  var area = avance;
   var jConv = num(cell_(row, headers, 'Jarras Conv'));
   var kgConv = num(cell_(row, headers, 'Kg Conv'));
   var jChina = num(cell_(row, headers, 'Jarras China'));
@@ -1447,7 +1633,8 @@ function acumuladoRowFromLog_(row, headers) {
     mdLabel_(cell_(row, headers, 'MD')),
     String(cell_(row, headers, 'Lote') || '').trim(),
     turnoLote_(cell_(row, headers, 'Turno')),
-    Math.round(area * 1000) / 1000,
+    Math.round(avance * 1000) / 1000,
+    areaReal > 0 ? Math.round(areaReal * 1000) / 1000 : '',
     jConv,
     Math.round(kgConv * 10) / 10,
     jChina,
@@ -1535,4 +1722,5 @@ function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
   if (appends.length) {
     sh.getRange(sh.getLastRow() + 1, 1, appends.length, ACUM_HEADERS.length).setValues(appends);
   }
+  try { paintTodayAcumGaps_(sh); } catch (ePaint) {}
 }

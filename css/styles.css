@@ -569,10 +569,11 @@ body.is-desktop .qb-toast {
 .avance-min {
   display: block;
   font-style: normal;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.78rem;
+  font-weight: 800;
   color: #9A5B00;
 }
+.avance-min.is-gap { color: #B71C1C; }
 .avance-min[hidden] { display: none; }
 .lote-extra {
   color: var(--muted);
@@ -698,6 +699,37 @@ body.is-desktop .qb-toast {
   font-size: 1.08rem;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
+}
+.open-lots { display: grid; gap: 6px; }
+.open-lots-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #9C1B1B;
+}
+.open-lot {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: #FDECEC;
+  color: #9C1B1B;
+  text-align: left;
+  font: inherit;
+}
+.open-lot b { font-size: 0.92rem; }
+.open-lot span { font-size: 0.78rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.open-lot small {
+  grid-column: 1 / -1;
+  color: #7A4A4A;
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 .lot-list { display: grid; gap: 10px; }
 .lot-row {
