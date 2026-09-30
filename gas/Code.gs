@@ -2,6 +2,7 @@ var TZ = 'America/Lima';
 var JARRA_KG = 1.14;
 var LOG = '_lotes';
 var RESP = 'Responsables';
+var COSECH = 'Cosechadores';
 var RESPONSABLE_FIJO = 'Luis Verde';
 var GREEN = '#1B5E20';
 var HEADERS = [
@@ -53,6 +54,13 @@ function doPost(e) {
 
     // Borra cualquier cola vieja SIN escribirla. No se revive lo ya enviado.
     dropMergeQueue_();
+
+    // Una sola vez: las hojas que ya existen recuperan los decimales del registro.
+    try {
+      if (PropertiesService.getScriptProperties().getProperty('kilos_dec_v4') !== '1') {
+        fixExistingKilos_();
+      }
+    } catch (eFix) {}
 
     var result = upsertBatch_(sh, recs, headers);
     SpreadsheetApp.flush();
@@ -220,12 +228,26 @@ function normalizeRecs_(body) {
 }
 
 function onOpen() {
+  try { ensureCosechadoresSheet_(); } catch (e0) {}
+  try { aplicarFormulasEnDias_(); } catch (e1) {}
   SpreadsheetApp.getUi()
     .createMenu('Q Berries')
+    .addItem('Crear hoja Cosechadores', 'crearHojaCosechadores')
     .addItem('Actualizar resumen', 'rebuildResumen')
+    .addItem('Corregir kilos (decimales)', 'corregirKilosDecimales')
     .addItem('Preparar hojas', 'setupSheets')
     .addItem('Probar guardado POST', 'runSaveSelfTestMenu_')
     .addToUi();
+}
+
+/** Solo crea la pestaña Cosechadores y deja las fórmulas del día. No reescribe kilos ni áreas. */
+function crearHojaCosechadores() {
+  var sh = ensureCosechadoresSheet_();
+  aplicarFormulasEnDias_();
+  sh.activate();
+  SpreadsheetApp.getUi().alert(
+    'Lista la hoja Cosechadores.\n\nEn Fecha escribe 29/09/2026 y en Cosechadores la cantidad. El reporte reparte ese número solo.'
+  );
 }
 
 function runSaveSelfTestMenu_() {
@@ -271,6 +293,7 @@ function migrateProduccion_(ss) {
 
 function setupSheets() {
   var ss = SpreadsheetApp.getActive();
+  ensureCosechadoresSheet_(ss);
   var sh = logSheet_(ss);
   ensureHeaders_(sh);
   ensureRespSheet_(ss);
@@ -580,18 +603,29 @@ function turnoLote_(v) {
   return String(v || '').replace(/^T/i, '').trim();
 }
 
+function kilosDeFila_(row, headers) {
+  var tot = num(cell_(row, headers, 'Total Kg'));
+  if (!(tot > 0)) tot = num(cell_(row, headers, 'Kg Conv')) + num(cell_(row, headers, 'Kg China'));
+  return round2_(tot);
+}
+
 function tiposDeFila_(row, headers) {
   var jConv = num(cell_(row, headers, 'Jarras Conv'));
   var jChina = num(cell_(row, headers, 'Jarras China'));
-  var kgConv = num(cell_(row, headers, 'Kg Conv'));
-  var kgChina = num(cell_(row, headers, 'Kg China'));
+  var kgConv = round2_(cell_(row, headers, 'Kg Conv'));
+  var kgChina = round2_(cell_(row, headers, 'Kg China'));
+  var totK = kilosDeFila_(row, headers);
   var out = [];
   if (jConv > 0 || kgConv > 0) out.push({ tipo: 'CONVENCIONAL', envase: jConv, kilos: kgConv });
   if (jChina > 0 || kgChina > 0) out.push({ tipo: 'CHINA', envase: jChina, kilos: kgChina });
   if (!out.length) {
     var totJ = num(cell_(row, headers, 'Total Jarras'));
-    var totK = num(cell_(row, headers, 'Total Kg'));
     if (totJ > 0 || totK > 0) out.push({ tipo: 'CONVENCIONAL', envase: totJ, kilos: totK });
+  }
+  if (out.length === 1 && totK > 0) out[0].kilos = totK;
+  else if (out.length === 2 && totK > 0) {
+    var sum = round2_(out[0].kilos + out[1].kilos);
+    if (sum !== totK) out[0].kilos = round2_(out[0].kilos + (totK - sum));
   }
   return out;
 }
@@ -599,6 +633,129 @@ function tiposDeFila_(row, headers) {
 function num(v) {
   var n = Number(v);
   return isFinite(n) ? n : 0;
+}
+
+function round2_(v) {
+  return Math.round(num(v) * 100) / 100;
+}
+
+function ensureCosechadoresSheet_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(COSECH);
+  if (!sh) sh = ss.insertSheet(COSECH);
+  var title = sh.getLastRow() > 0 ? String(sh.getRange(1, 3).getValue() || '') : '';
+  if (title !== 'Cosechadores') {
+    sh.getRange(1, 1, 1, 3).setValues([['Clave', 'Fecha', 'Cosechadores']]);
+  }
+  sh.getRange(1, 2, 1, 2).setFontWeight('bold').setBackground('#E8F5E9').setFontColor('#1B5E20');
+  sh.getRange('A2').setFormula(
+    '=ARRAYFORMULA(IF(B2:B="","",IF(ISNUMBER(B2:B),TEXT(B2:B,"dd/mm/yyyy"),TRIM(B2:B))))'
+  );
+  sh.setColumnWidth(2, 140);
+  sh.setColumnWidth(3, 160);
+  sh.setFrozenRows(1);
+  sh.setTabColor('#F7941D');
+  try { sh.hideColumns(1); } catch (e0) {}
+  return sh;
+}
+
+/** Cuenta las filas del día, sin la fila TOTAL. */
+function contarFilasDia_(sh) {
+  var last = sh.getLastRow();
+  if (last < 3) return 0;
+  var colA = sh.getRange(2, 1, last - 1, 1).getValues();
+  var n = 0;
+  var i;
+  for (i = 0; i < colA.length; i++) {
+    if (String(colA[i][0] || '').toUpperCase() === 'TOTAL') break;
+    n++;
+  }
+  return n;
+}
+
+/** Pone las fórmulas en las hojas del día que ya existen. No cambia kilos ni áreas. */
+function aplicarFormulasEnDias_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  ss.getSheets().forEach(function (sh) {
+    var name = String(sh.getName() || '');
+    if (!/\d{1,2}\D\d{1,2}\D\d{4}/.test(name) || !/ETAPA/i.test(name)) return;
+    var n = contarFilasDia_(sh);
+    if (n > 0) ponerFormulasDia_(sh, n);
+  });
+}
+
+function colDia_(sh, names, fallback) {
+  var width = Math.max(sh.getLastColumn(), fallback);
+  var head = sh.getRange(1, 1, 1, width).getValues()[0];
+  var i;
+  var j;
+  var h;
+  for (i = 0; i < head.length; i++) {
+    h = String(head[i] || '').trim().toLowerCase();
+    for (j = 0; j < names.length; j++) {
+      if (h === names[j]) return i + 1;
+    }
+  }
+  return fallback;
+}
+
+function letraCol_(n) {
+  var s = '';
+  while (n > 0) {
+    var r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/** Reparte el 241 en Jornales. Kg/Jornales queda 32. Busca la columna por su nombre. */
+function ponerFormulasDia_(sh, n) {
+  if (!sh || !n) return;
+  ensureCosechadoresSheet_();
+  var last = n + 1;
+  var tot = n + 2;
+  var cArea = colDia_(sh, ['área', 'area'], 12);
+  var cJn = colDia_(sh, ['jornales'], 13);
+  var cKg = colDia_(sh, ['kilos'], 14);
+  var cHa = colDia_(sh, ['kg/ha', 'kgha'], 15);
+  var cKj = colDia_(sh, ['kg/jornales', 'kg/jornal'], 16);
+  var cEnv = colDia_(sh, ['envase'], 8);
+  var L = letraCol_(cArea);
+  var M = letraCol_(cJn);
+  var N = letraCol_(cKg);
+  var H = letraCol_(cEnv);
+  var pTot = '$' + letraCol_(cKj) + '$' + tot;
+  var genteTot = 'IFERROR(VALUE(VLOOKUP(IF(ISNUMBER($B$2),TEXT($B$2,"dd/mm/yyyy"),TRIM($B$2&"")),' + COSECH + '!A:C,3,FALSE)),"")';
+  var puesto = num(sh.getRange(tot, cJn).getValue());
+  var cosech = [];
+  var kgJn = [];
+  var ha = [];
+  var i;
+  for (i = 2; i <= last; i++) {
+    cosech.push(['=IF(OR(' + N + i + '="",' + pTot + '="",' + pTot + '=0),"",' + N + i + '/' + pTot + ')']);
+    kgJn.push(['=IF(OR(' + M + i + '="",' + M + i + '=0),"",' + N + i + '/' + M + i + ')']);
+    ha.push(['=IF(OR(' + L + i + '="",' + L + i + '=0),"",' + N + i + '/' + L + i + ')']);
+  }
+  sh.getRange(tot, cJn).setFormula('=IF(' + genteTot + '="",' + (puesto > 0 ? puesto : '""') + ',' + genteTot + ')');
+  sh.getRange(tot, cKg).setFormula('=SUM(' + N + '2:' + N + last + ')');
+  sh.getRange(tot, cHa).setFormula('=IF(' + L + tot + '=0,"",' + N + tot + '/' + L + tot + ')');
+  sh.getRange(tot, cKj).setFormula('=IF(OR(' + M + tot + '="",' + M + tot + '=0),"",' + N + tot + '/' + M + tot + ')');
+  sh.getRange(2, cJn, n, 1).setFormulas(cosech);
+  sh.getRange(2, cHa, n, 1).setFormulas(ha);
+  sh.getRange(2, cKj, n, 1).setFormulas(kgJn);
+  sh.getRange(tot, cEnv).setFormula('=SUM(' + H + '2:' + H + last + ')');
+  sh.getRange(tot, cArea).setFormula('=SUM(' + L + '2:' + L + last + ')');
+  sh.getRange(2, cJn, n, 1).setNumberFormat('#,##0');
+  sh.getRange(2, cKg, n, 1).setNumberFormat('#,##0');
+  sh.getRange(2, cHa, n, 1).setNumberFormat('0');
+  sh.getRange(2, cKj, n, 1).setNumberFormat('0');
+  sh.getRange(tot, cEnv).setNumberFormat('#,##0');
+  sh.getRange(tot, cArea).setNumberFormat('0.00');
+  sh.getRange(tot, cJn).setNumberFormat('#,##0');
+  sh.getRange(tot, cKg).setNumberFormat('#,##0');
+  sh.getRange(tot, cHa).setNumberFormat('0');
+  sh.getRange(tot, cKj).setNumberFormat('0');
 }
 
 function sheetNameDia_(iso) {
@@ -635,7 +792,7 @@ function dropOldResumen_(ss) {
   });
 }
 
-function writeDaySheet_(sh, rows) {
+function writeDaySheet_(sh, rows, restyle) {
   var cols = RESUMEN_HEADERS.length;
   var wasEmpty = sh.getLastRow() === 0;
   var n = rows && rows.length ? rows.length : 0;
@@ -657,21 +814,24 @@ function writeDaySheet_(sh, rows) {
       .setFontColor('#000000');
   }
   var empty = ['', '', '', '', '', '', '', 0, '', '', '', 0, 0, 0, '', '', ''];
-  if (n) {
-    empty[7] = rows.reduce(function (a, r) { return a + num(r[7]); }, 0);
-    empty[11] = Math.round(rows.reduce(function (a, r) { return a + num(r[11]); }, 0) * 100) / 100;
-    empty[12] = rows.reduce(function (a, r) { return a + num(r[12]); }, 0);
-    empty[13] = rows.reduce(function (a, r) { return a + num(r[13]); }, 0);
-    empty[14] = empty[11] > 0 ? Math.round(empty[13] / empty[11]) : '';
-    empty[15] = empty[12] > 0 ? Math.round(empty[13] / empty[12]) : '';
-  }
   sh.getRange(totRow, 1, 1, cols).setValues([empty]);
   sh.getRange(totRow, 1).setValue('TOTAL');
-  if (wasEmpty) styleResumen_(sh, lastData, totRow);
+  if (wasEmpty || restyle) styleResumen_(sh, lastData, totRow);
   else {
     sh.getRange(1, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
     sh.getRange(totRow, 1, 1, cols).setBackground('#F3F3F3').setFontWeight('bold');
+    if (n) {
+      sh.getRange(2, 12, n, 1).setNumberFormat('0.00');
+      sh.getRange(2, 13, n, 1).setNumberFormat('#,##0');
+      sh.getRange(2, 14, n, 1).setNumberFormat('#,##0');
+      sh.getRange(2, 15, n, 2).setNumberFormat('#,##0');
+    }
+    sh.getRange(totRow, 12).setNumberFormat('0.00');
+    sh.getRange(totRow, 13).setNumberFormat('#,##0');
+    sh.getRange(totRow, 14).setNumberFormat('#,##0');
+    sh.getRange(totRow, 15, 1, 2).setNumberFormat('#,##0');
   }
+  ponerFormulasDia_(sh, n);
 }
 
 function supervisorKey_(dni, nombre, nameToDni) {
@@ -763,7 +923,7 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
       g.kilos += t.kilos;
       if (idx === 0) {
         g.area += area;
-        g.jornales = Math.max(num(g.jornales), jornales);
+        g.jornales += jornales;
       }
     });
   });
@@ -772,14 +932,13 @@ function groupLogToDays_(headers, values, mananaAvExtra) {
     var g = groups[key];
     var bucket = g.iso + '|' + (g.etapaSheet || 'ETAPA I');
     if (!byDay[bucket]) byDay[bucket] = [];
-    var jornales = num(g.jornales);
-    var kgHa = g.area > 0 ? Math.round(g.kilos / g.area) : '';
-    var kgJn = jornales > 0 ? Math.round(g.kilos / jornales) : '';
+    var kilos = round2_(g.kilos);
+    var area = Math.round(g.area * 100) / 100;
     byDay[bucket].push([
       g.semana, g.fecha, g.tipo, g.fundo, g.md, g.variedad, g.turno || '',
       g.envase, '', g.responsable || RESPONSABLE_FIJO, '',
-      Math.round(g.area * 100) / 100, jornales,
-      Math.round(g.kilos), kgHa, kgJn, horaLabel_(g)
+      area, num(g.jornales),
+      kilos, area > 0 ? Math.round(kilos / area) : '', '', horaLabel_(g)
     ]);
   });
   return byDay;
@@ -850,9 +1009,8 @@ function applyDayRows_(map, order, rows, sign) {
     var cur = map[k];
     cur[7] = num(cur[7]) + sign * num(r[7]);
     cur[11] = Math.round((num(cur[11]) + sign * num(r[11])) * 1000) / 1000;
-    cur[13] = Math.round(num(cur[13]) + sign * num(r[13]));
+    cur[13] = round2_(num(cur[13]) + sign * num(r[13]));
     if (sign > 0) {
-      cur[12] = Math.max(num(cur[12]), num(r[12]));
       cur[16] = mergeHoraLabel_(cur[16], r[16]);
       if (!cur[9]) cur[9] = r[9] || RESPONSABLE_FIJO;
       // Preferir textos canónicos del envío nuevo
@@ -862,8 +1020,9 @@ function applyDayRows_(map, order, rows, sign) {
       if (r[5]) cur[5] = r[5];
       if (r[6] !== '' && r[6] != null) cur[6] = r[6];
     }
-    cur[14] = num(cur[11]) > 0 ? Math.round(num(cur[13]) / num(cur[11])) : '';
-    cur[15] = num(cur[12]) > 0 ? Math.round(num(cur[13]) / num(cur[12])) : '';
+    cur[12] = num(cur[12]) + sign * num(r[12]);
+    cur[14] = '';
+    cur[15] = '';
     if (num(cur[7]) <= 0 && num(cur[13]) <= 0 && Math.abs(num(cur[11])) < 0.0005) {
       delete map[k];
     }
@@ -1114,7 +1273,7 @@ function mergeResponsablesFromDeltas_(ss, headers, deltas) {
       turnoCampo,
       g.fundo || '',
       Math.round(g.jarras),
-      Math.round(g.kilos * 100) / 100,
+      round2_(g.kilos),
       hora
     ]);
   });
@@ -1223,7 +1382,7 @@ function groupResponsables_(headers, values) {
       turnoCampo,
       g.fundo || '',
       Math.round(g.jarras),
-      Math.round(g.kilos * 100) / 100,
+      round2_(g.kilos),
       hora
     ]);
   });
@@ -1249,7 +1408,7 @@ function writeResponsablesSheet_(sh, rows) {
       .setBackground('#FFFFFF')
       .setHorizontalAlignment('center');
     sh.getRange(2, 6, rows.length, 1).setNumberFormat('#,##0');
-    sh.getRange(2, 7, rows.length, 1).setNumberFormat('0.00');
+    sh.getRange(2, 7, rows.length, 1).setNumberFormat('#,##0.00');
   }
   if (wasEmpty) {
     sh.setFrozenRows(1);
@@ -1298,6 +1457,374 @@ function rebuildResponsables_(ss, headers, values, isoList) {
   writeResponsablesSheet_(sh, allRows);
 }
 
+function existingDaySheets_(ss) {
+  var map = {};
+  ss.getSheets().forEach(function (s) {
+    var name = String(s.getName() || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[\u2010-\u2015]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    var m = /^(\d{1,2})\D(\d{1,2})\D(\d{4}).*?(ETAPA\s*(?:IV|III|II|I))/i.exec(name);
+    if (!m) return;
+    var iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    var etapa = normEtapa_(m[4]);
+    if (!iso || !etapa) return;
+    map[iso + '|' + etapa] = s;
+  });
+  return map;
+}
+
+function normEtapa_(s) {
+  var m = /\b(IV|III|II|I)\b/.exec(String(s || '').toUpperCase());
+  return m ? 'ETAPA ' + m[1] : '';
+}
+
+function isoFromFechaCell_(v) {
+  var iso = toIsoFecha_(v);
+  if (iso) return iso;
+  var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(v || '').trim());
+  if (!m) return '';
+  return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+}
+
+function respGroupKey_(iso, dni, nombre, fundo) {
+  var id = String(dni || '').replace(/\D/g, '').slice(0, 8);
+  var nom = String(nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  var fu = String(fundo || '').trim().toUpperCase();
+  if (!iso) return '';
+  return iso + '|' + (id.length === 8 ? id : nom) + '|' + fu;
+}
+
+function sheetCols_(sh) {
+  var width = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, width).getValues()[0];
+  var map = {};
+  var i;
+  for (i = 0; i < have.length; i++) {
+    var name = String(have[i] || '').trim();
+    if (name && !map.hasOwnProperty(name)) map[name] = i;
+  }
+  return { have: have, map: map, width: width };
+}
+
+function colOf_(map, names) {
+  var i;
+  for (i = 0; i < names.length; i++) {
+    if (map.hasOwnProperty(names[i])) return map[names[i]];
+  }
+  return -1;
+}
+
+function readResponsablesKilos_(ss) {
+  var sh = ss.getSheetByName(RESP);
+  var out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  var info = sheetCols_(sh);
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, info.width).getValues();
+  var fi = colOf_(info.map, ['Fecha']);
+  var di = colOf_(info.map, ['Supervisor DNI']);
+  var si = colOf_(info.map, ['Supervisor']);
+  var fui = colOf_(info.map, ['Fundo']);
+  var ki = colOf_(info.map, ['Kilos']);
+  if (fi < 0 || ki < 0) return out;
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var iso = isoFromFechaCell_(data[i][fi]);
+    var key = respGroupKey_(iso, di >= 0 ? data[i][di] : '', si >= 0 ? data[i][si] : '', fui >= 0 ? data[i][fui] : '');
+    if (!key) continue;
+    out[key] = round2_(num(out[key]) + num(data[i][ki]));
+  }
+  return out;
+}
+
+function splitKilos_(target, weights) {
+  var out = [];
+  var n = weights.length;
+  var i;
+  var sumW = 0;
+  for (i = 0; i < n; i++) sumW += num(weights[i]);
+  var acc = 0;
+  for (i = 0; i < n; i++) {
+    if (i === n - 1) {
+      out.push(round2_(target - acc));
+      break;
+    }
+    var part = sumW > 0 ? round2_(target * num(weights[i]) / sumW) : round2_(target / n);
+    out.push(part);
+    acc = round2_(acc + part);
+  }
+  return out;
+}
+
+/** Reparte el kilo de Responsables en los lotes de Acumulado y de ahí a la hoja del día. */
+function recalcDesdeResponsables_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  var resp = readResponsablesKilos_(ss);
+  var nAcum = applyResponsablesKilosToAcum_(ss, resp);
+  var nDays = applyAcumKilosToDaySheets_(ss);
+  SpreadsheetApp.flush();
+  try { PropertiesService.getScriptProperties().setProperty('kilos_dec_v4', '1'); } catch (e0) {}
+  return { days: nDays, acum: nAcum, resp: Object.keys(resp).length };
+}
+
+function applyResponsablesKilosToAcum_(ss, resp) {
+  var sh = ss.getSheetByName(ACUM);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  try { var flt = sh.getFilter(); if (flt) flt.remove(); } catch (e0) {}
+  var info = sheetCols_(sh);
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, info.width).getValues();
+  var cFecha = colOf_(info.map, ['Fecha']);
+  var cDni = colOf_(info.map, ['Supervisor DNI']);
+  var cNom = colOf_(info.map, ['Supervisor']);
+  var cFundo = colOf_(info.map, ['Fundo']);
+  var cJConv = colOf_(info.map, ['Jarras Conv']);
+  var cJChina = colOf_(info.map, ['Jarras China']);
+  var cTotJ = colOf_(info.map, ['Total Jarras']);
+  var cKgConv = colOf_(info.map, ['Kg Conv']);
+  var cKgChina = colOf_(info.map, ['Kg China']);
+  var cTotK = colOf_(info.map, ['Total Kg']);
+  var cAv = colOf_(info.map, ['Avance']);
+  var cAr = colOf_(info.map, ['Área', 'Area']);
+  var cJn = colOf_(info.map, ['Jornales']);
+  var cHa = colOf_(info.map, ['Kg/ha']);
+  var cKj = colOf_(info.map, ['Kg/Jn']);
+  if (cFecha < 0 || cTotK < 0) return 0;
+  var groups = {};
+  var order = [];
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var iso = isoFromFechaCell_(data[i][cFecha]);
+    var key = respGroupKey_(iso, cDni >= 0 ? data[i][cDni] : '', cNom >= 0 ? data[i][cNom] : '', cFundo >= 0 ? data[i][cFundo] : '');
+    if (!key || !resp.hasOwnProperty(key)) continue;
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    var jars = cTotJ >= 0 ? num(data[i][cTotJ]) : 0;
+    if (!(jars > 0)) {
+      jars = (cJConv >= 0 ? num(data[i][cJConv]) : 0) + (cJChina >= 0 ? num(data[i][cJChina]) : 0);
+    }
+    groups[key].push({ i: i, jars: jars });
+  }
+  var changed = 0;
+  order.forEach(function (key) {
+    var items = groups[key];
+    var weights = items.map(function (it) { return it.jars; });
+    var parts = splitKilos_(resp[key], weights);
+    items.forEach(function (it, idx) {
+      var kg = parts[idx];
+      var jConv = cJConv >= 0 ? num(data[it.i][cJConv]) : 0;
+      var jChina = cJChina >= 0 ? num(data[it.i][cJChina]) : 0;
+      var kgConv = kg;
+      var kgChina = 0;
+      if (jChina > 0 && jConv > 0) {
+        kgConv = round2_(kg * jConv / (jConv + jChina));
+        kgChina = round2_(kg - kgConv);
+      } else if (jChina > 0) {
+        kgConv = 0;
+        kgChina = kg;
+      }
+      if (cKgConv >= 0) data[it.i][cKgConv] = kgConv;
+      if (cKgChina >= 0) data[it.i][cKgChina] = kgChina;
+      data[it.i][cTotK] = round2_(kgConv + kgChina);
+      var base = cAv >= 0 && num(data[it.i][cAv]) > 0 ? num(data[it.i][cAv]) : (cAr >= 0 ? num(data[it.i][cAr]) : 0);
+      var jn = cJn >= 0 ? num(data[it.i][cJn]) : 0;
+      if (cHa >= 0) data[it.i][cHa] = base > 0 ? Math.round(data[it.i][cTotK] / base) : '';
+      if (cKj >= 0) data[it.i][cKj] = jn > 0 ? Math.round(data[it.i][cTotK] / jn) : '';
+      changed++;
+    });
+  });
+  if (!changed) return 0;
+  sh.getRange(2, 1, n, info.width).setValues(data);
+  [cKgConv, cKgChina, cTotK].forEach(function (c) {
+    if (c >= 0) sh.getRange(2, c + 1, n, 1).setNumberFormat('#,##0.00');
+  });
+  return changed;
+}
+
+function applyAcumKilosToDaySheets_(ss) {
+  var acum = ss.getSheetByName(ACUM);
+  if (!acum || acum.getLastRow() < 2) return 0;
+  var info = sheetCols_(acum);
+  var n = acum.getLastRow() - 1;
+  var data = acum.getRange(2, 1, n, info.width).getValues();
+  var cFecha = colOf_(info.map, ['Fecha']);
+  var cFundo = colOf_(info.map, ['Fundo']);
+  var cVar = colOf_(info.map, ['Variedad']);
+  var cMd = colOf_(info.map, ['Módulo', 'Modulo']);
+  var cTurno = colOf_(info.map, ['Turno']);
+  var cKgConv = colOf_(info.map, ['Kg Conv']);
+  var cKgChina = colOf_(info.map, ['Kg China']);
+  var cTotK = colOf_(info.map, ['Total Kg']);
+  if (cFecha < 0 || cTotK < 0) return 0;
+  var sums = {};
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var iso = isoFromFechaCell_(data[i][cFecha]);
+    if (!iso) continue;
+    var fundo = cFundo >= 0 ? data[i][cFundo] : '';
+    var etapa = etapaSheetLabel_(fundo, fundo);
+    var md = mdLabel_(cMd >= 0 ? data[i][cMd] : '');
+    var variedad = cVar >= 0 ? data[i][cVar] : '';
+    var turno = turnoLote_(cTurno >= 0 ? data[i][cTurno] : '');
+    var kgConv = cKgConv >= 0 ? num(data[i][cKgConv]) : 0;
+    var kgChina = cKgChina >= 0 ? num(data[i][cKgChina]) : 0;
+    var bits = [];
+    if (kgConv > 0) bits.push({ tipo: 'CONVENCIONAL', kilos: kgConv });
+    if (kgChina > 0) bits.push({ tipo: 'CHINA', kilos: kgChina });
+    if (!bits.length && num(data[i][cTotK]) > 0) bits.push({ tipo: 'CONVENCIONAL', kilos: num(data[i][cTotK]) });
+    bits.forEach(function (b) {
+      var rowKey = [
+        b.tipo,
+        String(fundo || '').trim().toUpperCase().replace(/\s+/g, ' '),
+        md,
+        String(variedad || '').trim().toUpperCase().replace(/\s+/g, ' '),
+        turno
+      ].join('|');
+      var bucket = iso + '|' + etapa + '|' + rowKey;
+      sums[bucket] = round2_(num(sums[bucket]) + b.kilos);
+    });
+  }
+  var sheets = existingDaySheets_(ss);
+  var nDays = 0;
+  Object.keys(sheets).forEach(function (bucket) {
+    var sh = sheets[bucket];
+    var iso = bucket.split('|')[0];
+    var etapa = normEtapa_(bucket);
+    if (paintDayKilosFromSums_(sh, iso, etapa, sums)) nDays++;
+  });
+  return nDays;
+}
+
+function paintDayKilosFromSums_(sh, iso, etapa, sums) {
+  if (!sh || sh.getLastRow() < 2) return false;
+  try { var flt = sh.getFilter(); if (flt) flt.remove(); } catch (e0) {}
+  var cols = RESUMEN_HEADERS.length;
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, Math.max(sh.getLastColumn(), cols)).getValues();
+  var touched = false;
+  var i;
+  var totAt = -1;
+  for (i = 0; i < data.length; i++) {
+    if (String(data[i][0] || '').toUpperCase() === 'TOTAL') { totAt = i; break; }
+    var rowKey = dayRowKey_(data[i]);
+    var bucket = iso + '|' + etapa + '|' + rowKey;
+    if (!sums.hasOwnProperty(bucket)) continue;
+    data[i][13] = round2_(sums[bucket]);
+    data[i][14] = '';
+    data[i][15] = '';
+    touched = true;
+  }
+  if (!touched) return false;
+  var nData = totAt >= 0 ? totAt : data.length;
+  sh.getRange(2, 1, n, cols).setValues(data.map(function (r) { return r.slice(0, cols); }));
+  sh.getRange(2, 13, nData, 1).setNumberFormat('#,##0');
+  sh.getRange(2, 14, nData, 1).setNumberFormat('#,##0');
+  ponerFormulasDia_(sh, nData);
+  return true;
+}
+
+/** Kilos de la hoja del día y de Acumulado salen de la hoja Responsables. */
+function fixExistingKilos_() {
+  return recalcDesdeResponsables_(SpreadsheetApp.getActive());
+}
+
+function fixAcumuladoKilosFromLog_(ss, headers, values) {
+  var sh = ss.getSheetByName(ACUM);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var fromLog = {};
+  var i;
+  for (i = 0; i < values.length; i++) {
+    var key = fallbackKeyFromRow_(values[i], headers);
+    if (key) fromLog[key] = acumuladoRowFromLog_(values[i], headers);
+  }
+  var head = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), ACUM_HEADERS.length)).getValues()[0];
+  function ix(name, fallback) {
+    var n = head.indexOf(name);
+    return n >= 0 ? n : fallback;
+  }
+  var idx = {
+    fecha: ix('Fecha', 0),
+    dni: ix('Supervisor DNI', 3),
+    tc: ix('Turno campo', 4),
+    lote: ix('Lote', 8)
+  };
+  var nData = sh.getLastRow() - 1;
+  var width = Math.max(head.length, ACUM_HEADERS.length);
+  var data = sh.getRange(2, 1, nData, width).getValues();
+  var updates = [];
+  for (i = 0; i < data.length; i++) {
+    var k = acumuladoKeyFromValues_(data[i], idx);
+    if (k && fromLog[k]) updates.push({ row: i + 2, values: fromLog[k] });
+  }
+  if (updates.length) {
+    updates.sort(function (a, b) { return a.row - b.row; });
+    var u = 0;
+    while (u < updates.length) {
+      var start = u;
+      var block = [updates[u].values];
+      while (u + 1 < updates.length && updates[u + 1].row === updates[u].row + 1) {
+        u++;
+        block.push(updates[u].values);
+      }
+      sh.getRange(updates[start].row, 1, block.length, ACUM_HEADERS.length).setValues(block);
+      u++;
+    }
+  }
+  ensureAcumuladoSheet_(ss);
+  try { paintTodayAcumGaps_(sh); } catch (ePaint) {}
+  return updates.length;
+}
+
+function fixResponsablesKilosFromLog_(ss, headers, values) {
+  var sh = ss.getSheetByName(RESP);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var contrib = contribResponsables_(headers, values);
+  var have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+  var fi = have.indexOf('Fecha');
+  var si = have.indexOf('Supervisor');
+  var di = have.indexOf('Supervisor DNI');
+  var fui = have.indexOf('Fundo');
+  var ki = have.indexOf('Kilos');
+  if (ki < 0) return 0;
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, have.length).getValues();
+  var col = [];
+  var changed = 0;
+  var i;
+  for (i = 0; i < data.length; i++) {
+    var row = data[i];
+    var fechaDisp = row[fi >= 0 ? fi : 0];
+    var iso = toIsoFecha_(fechaDisp);
+    if (!iso) {
+      var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(fechaDisp || '').trim());
+      if (m) iso = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    }
+    var id = String(di >= 0 ? row[di] : '').replace(/\D/g, '').slice(0, 8);
+    var nom = String(si >= 0 ? row[si] : '').replace(/\s+/g, ' ').trim().toUpperCase();
+    var fu = String(fui >= 0 ? row[fui] : '').trim().toUpperCase();
+    var key = iso ? iso + '|' + (id.length === 8 ? id : nom) + '|' + fu : '';
+    if (key && contrib[key]) {
+      col.push([round2_(contrib[key].kilos)]);
+      changed++;
+    } else {
+      col.push([round2_(row[ki])]);
+    }
+  }
+  sh.getRange(2, ki + 1, n, 1).setValues(col);
+  sh.getRange(2, ki + 1, n, 1).setNumberFormat('#,##0.00');
+  return changed;
+}
+
+function corregirKilosDecimales() {
+  var r = fixExistingKilos_();
+  SpreadsheetApp.getUi().alert(
+    'Kilos con decimales',
+    'Responsables usados: ' + r.resp + '\nFilas de Acumulado: ' + r.acum + '\nHojas del día: ' + r.days,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
 function rebuildResumen() {
   // Ya no reconstruye desde _lotes: si borraste la hoja del día, no se revive el historial.
   // El resumen solo crece con cada Enviar (suma en el mismo módulo).
@@ -1334,7 +1861,8 @@ function styleResumen_(sh, lastData, totRow) {
     sh.getRange(2, 8, lastData - 1, 1).setNumberFormat('#,##0');
     sh.getRange(2, 10, lastData - 1, 1).setNumberFormat('@').setWrap(true);
     sh.getRange(2, 12, lastData - 1, 1).setNumberFormat('0.00');
-    sh.getRange(2, 13, lastData - 1, 2).setNumberFormat('#,##0');
+    sh.getRange(2, 13, lastData - 1, 1).setNumberFormat('#,##0');
+    sh.getRange(2, 14, lastData - 1, 1).setNumberFormat('#,##0');
     sh.getRange(2, 15, lastData - 1, 2).setNumberFormat('#,##0');
     sh.getRange(2, 17, lastData - 1, 1).setNumberFormat('@');
   }
@@ -1344,7 +1872,8 @@ function styleResumen_(sh, lastData, totRow) {
     .setFontWeight('bold');
   sh.getRange(totRow, 8).setNumberFormat('#,##0');
   sh.getRange(totRow, 12).setNumberFormat('0.00');
-  sh.getRange(totRow, 13, 1, 2).setNumberFormat('#,##0');
+  sh.getRange(totRow, 13).setNumberFormat('#,##0');
+  sh.getRange(totRow, 14).setNumberFormat('#,##0');
   sh.getRange(totRow, 15, 1, 2).setNumberFormat('#,##0');
   var widths = [70, 92, 110, 78, 70, 96, 70, 72, 70, 168, 86, 70, 90, 70, 68, 92, 86];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
@@ -1603,6 +2132,14 @@ function ensureAcumuladoSheet_(ss) {
     .setHorizontalAlignment('center');
   sh.setTabColor('#1565C0');
   sh.setFrozenRows(1);
+  var kgCols = ['Kg Conv', 'Kg China', 'Total Kg'];
+  var headNow = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+  var lastBody = sh.getLastRow();
+  kgCols.forEach(function (name) {
+    var c = headNow.indexOf(name);
+    if (c < 0 || lastBody < 2) return;
+    sh.getRange(2, c + 1, lastBody - 1, 1).setNumberFormat('#,##0.00');
+  });
   placeAfterResponsables_(ss, sh);
   return sh;
 }
@@ -1636,11 +2173,11 @@ function acumuladoRowFromLog_(row, headers) {
     Math.round(avance * 1000) / 1000,
     areaReal > 0 ? Math.round(areaReal * 1000) / 1000 : '',
     jConv,
-    Math.round(kgConv * 10) / 10,
+    round2_(kgConv),
     jChina,
-    Math.round(kgChina * 10) / 10,
+    round2_(kgChina),
     Math.round(totJ),
-    Math.round(totK * 10) / 10,
+    round2_(totK),
     jornales > 0 ? jornales : '',
     area > 0 ? Math.round(totK / area) : '',
     jornales > 0 ? Math.round(totK / jornales) : '',

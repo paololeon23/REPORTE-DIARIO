@@ -244,16 +244,33 @@ APP.App = (() => {
   }
 
   function avanceParaGuardar() {
+    const typed = Number(state.avance) || 0;
+    if (state.cierre) {
+      const mine = Number(state.cierre.mio) || 0;
+      const total = Math.round((mine + typed) * 1000) / 1000;
+      return total > 0 ? String(total) : "";
+    }
     return state.avance || "";
+  }
+
+  function hechoHa() {
+    if (!state.cierre) return 0;
+    return Math.round((Number(state.cierre.avance) || 0) * 1000) / 1000;
   }
 
   function faltaHa() {
     if (!state.cierre) return null;
     const area = Number(state.cierre.area) || 0;
-    const sum = Number(state.cierre.avance) || 0;
-    const mine = Number(state.cierre.mio) || 0;
     const typed = Number(state.avance) || 0;
-    return Math.round((area - (sum - mine) - typed) * 1000) / 1000;
+    return Math.round((area - hechoHa() - typed) * 1000) / 1000;
+  }
+
+  function avanceTope() {
+    if (state.cierre) {
+      const left = Math.round(((Number(state.cierre.area) || 0) - hechoHa()) * 1000) / 1000;
+      return left > 0 ? left : 0;
+    }
+    return loteAreaMax();
   }
 
   function avanceFloor() {
@@ -265,16 +282,33 @@ APP.App = (() => {
   function paintAvanceHint() {
     const hint = $("#avance-min");
     if (!hint) return;
+    const lab = $("#lbl-avance");
+    const inp = $("#inp-avance");
     if (state.cierre) {
+      const hecho = hechoHa();
       const left = faltaHa();
       hint.hidden = false;
-      hint.classList.add("is-gap");
-      if (left > 0) hint.textContent = `Falta ${left} ha`;
-      else if (left < 0) hint.textContent = `Supera el área por ${Math.abs(left)} ha`;
-      else hint.textContent = "Con esto se completa el área";
+      const base = `Se trabajó ${haTxt(hecho)} ha.`;
+      if (left > 0) {
+        hint.classList.remove("is-gap");
+        hint.textContent = `${base} Falta ${haTxt(left)} ha.`;
+      } else if (left < 0) {
+        hint.classList.add("is-gap");
+        hint.textContent = `${base} Supera el área por ${haTxt(Math.abs(left))} ha.`;
+      } else if (Number(state.avance) > 0) {
+        hint.classList.remove("is-gap");
+        hint.textContent = `${base} Con esto se completa el área.`;
+      } else {
+        hint.classList.remove("is-gap");
+        hint.textContent = `${base} Falta 0 ha.`;
+      }
+      if (lab) lab.textContent = "Lo que avanzas ahora (ha)";
+      if (inp) inp.placeholder = "Solo lo de ahora";
       return;
     }
     hint.classList.remove("is-gap");
+    if (lab) lab.textContent = "Avance (ha)";
+    if (inp && document.activeElement !== inp) inp.placeholder = "0";
     const floor = avanceFloor();
     if (floor > 0) {
       hint.hidden = false;
@@ -342,7 +376,7 @@ APP.App = (() => {
     if (!finish && s.endsWith(".")) return { text: s, num: Number(s.slice(0, -1)) || 0 };
     const n = Number(s);
     if (!Number.isFinite(n) || n < 0) return { text: "", num: 0 };
-    const max = loteAreaMax();
+    const max = avanceTope();
     if (max != null && n > max) return { text: String(max), num: max, capped: true };
     const floor = avanceFloor();
     if (floor > 0 && n < floor) return { text: String(floor), num: floor, floored: true };
@@ -412,11 +446,30 @@ APP.App = (() => {
     el.value = v || "1.14";
   }
 
+  function jarrasDe(records) {
+    return (records || []).reduce((sum, r) => sum + (Number(APP.Data.derive(r).totalJarras) || 0), 0);
+  }
+
   function paintTotals() {
     const d = APP.Data.derive(currentData());
     const j = $("#lbl-jarras");
     const k = $("#lbl-kg");
-    if (j) j.textContent = d.totalJarras + " jarras";
+    if (j) {
+      const lote = state.lote && state.lote.lote;
+      if (isTarde() && lote) {
+        const mananaRec = APP.API.recordOf(lote, today(), "Mañana", supDni(), state.session.fundo);
+        const manana = mananaRec ? Number(APP.Data.derive(mananaRec).totalJarras) || 0 : 0;
+        const ahora = Number(d.totalJarras) || 0;
+        j.classList.add("is-split");
+        j.innerHTML =
+          `<span class="jar-bit"><small>Mañana</small><b>${manana}</b></span>` +
+          `<span class="jar-bit"><small>Ahora</small><b>${ahora}</b></span>` +
+          `<span class="jar-bit"><small>Total</small><b>${manana + ahora}</b></span>`;
+      } else {
+        j.classList.remove("is-split");
+        j.textContent = d.totalJarras + " jarras";
+      }
+    }
     if (k) k.textContent = d.totalKg + " kg";
     paintSaveBtn();
   }
@@ -452,10 +505,16 @@ APP.App = (() => {
     const records = dayRecords();
     const model = dayModel();
     const t = model.totals;
+    const tarde = isTarde();
+    const mananaJ = tarde ? jarrasDe(dayRecords(today(), "Mañana")) : 0;
+    const tardeJ = tarde ? jarrasDe(dayRecords(today(), "Tarde")) : 0;
+    const jarrasKpi = tarde
+      ? `<div class="kpi-split"><small>Jarras</small><b><i>Mañana ${mananaJ}</i><i>Ahora ${tardeJ}</i><i>Total ${mananaJ + tardeJ}</i></b></div>`
+      : `<div><small>Jarras</small><strong>${t.totalJarras}</strong></div>`;
     $("#day-kpis").innerHTML = `
       <div><small>Lotes</small><strong>${model.filledCount}</strong></div>
       <div><small>Área</small><strong>${t.area} ha</strong></div>
-      <div><small>Jarras</small><strong>${t.totalJarras}</strong></div>
+      ${jarrasKpi}
       <div><small>Kg</small><strong>${t.totalKg}</strong></div>`;
     $("#lot-list").innerHTML = records.length
       ? records
@@ -686,13 +745,13 @@ APP.App = (() => {
         return;
       }
       const av = applyAvance(state.avance, true);
-      const maxHa = loteAreaMax();
+      const maxHa = avanceTope();
       if (!(av.num > 0)) {
-        await feedback("Avance inválido", "Solo números. Sin letras.");
+        await feedback("Avance inválido", "Escribe solo lo que avanzas ahora.");
         return;
       }
       if (maxHa != null && av.num > maxHa) {
-        await feedback("Avance máximo", `No puede superar ${maxHa} ha.`);
+        await feedback("Avance máximo", state.cierre ? `Solo falta ${haTxt(maxHa)} ha.` : `No puede superar ${maxHa} ha.`);
         return;
       }
       const floor = avanceFloor();
