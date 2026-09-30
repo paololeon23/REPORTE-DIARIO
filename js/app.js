@@ -245,10 +245,11 @@ APP.App = (() => {
 
   function avanceParaGuardar() {
     const typed = Number(state.avance) || 0;
-    if (state.cierre) {
-      const mine = Number(state.cierre.mio) || 0;
-      const total = Math.round((mine + typed) * 1000) / 1000;
-      return total > 0 ? String(total) : "";
+    if (state.cierre) return typed > 0 ? String(typed) : "";
+    if (isTarde() && state.lote) {
+      const morning = morningAvanceOf(state.lote.lote);
+      const delta = Math.round((typed - morning) * 1000) / 1000;
+      return delta > 0 ? String(delta) : "";
     }
     return state.avance || "";
   }
@@ -331,7 +332,11 @@ APP.App = (() => {
     state.lote = L;
     const floor = isTarde() ? morningAvanceOf(L.lote) : 0;
     const recAv = rec ? Number(rec.avance) : 0;
-    if (rec && Number.isFinite(recAv) && recAv > 0) state.avance = String(rec.avance);
+    const areaLot = Number(L && L.area) || 0;
+    const looksCumulative = floor > 0 && recAv >= floor && areaLot > 0 && floor + recAv > areaLot + 0.0001;
+    if (isTarde() && rec && Number.isFinite(recAv) && recAv > 0 && !looksCumulative) {
+      state.avance = String(Math.round((floor + recAv) * 1000) / 1000);
+    } else if (rec && Number.isFinite(recAv) && recAv > 0) state.avance = String(rec.avance);
     else if (floor > 0) state.avance = String(floor);
     else state.avance = "";
     state.jarrasConv = rec ? String(rec.jarrasConv || "") : "";
@@ -462,9 +467,9 @@ APP.App = (() => {
         const ahora = Number(d.totalJarras) || 0;
         j.classList.add("is-split");
         j.innerHTML =
-          `<span class="jar-bit"><small>Mañana</small><b>${manana}</b></span>` +
-          `<span class="jar-bit"><small>Ahora</small><b>${ahora}</b></span>` +
-          `<span class="jar-bit"><small>Total</small><b>${manana + ahora}</b></span>`;
+          `<div class="jar-bit"><small>Mañana</small><b>${manana}</b></div>` +
+          `<div class="jar-bit"><small>Ahora</small><b>${ahora}</b></div>` +
+          `<div class="jar-bit is-total"><small>Total</small><b>${manana + ahora}</b></div>`;
       } else {
         j.classList.remove("is-split");
         j.textContent = d.totalJarras + " jarras";
@@ -526,8 +531,10 @@ APP.App = (() => {
             const avance = r.avance !== "" && r.avance != null ? r.avance : "—";
             const areaN = Number(area);
             const avN = Number(avance);
-            const falta = Number.isFinite(areaN) && areaN > 0 && !(Number.isFinite(avN) && avN >= areaN);
+            const faltaLocal = Number.isFinite(areaN) && areaN > 0 && !(Number.isFinite(avN) && avN >= areaN);
             const subido = APP.API.isUploaded(r);
+            const sigueAbierto = (state.openLots || []).some((o) => String(o.lote) === String(r.lote));
+            const falta = subido && state.openLotsLoaded ? sigueAbierto : faltaLocal;
             return `<div class="lot-row">
               <article class="lot-item${falta ? " is-short" : " is-ok"}" data-lote="${esc(r.lote)}" data-tc="${tc}">
                 <div class="lot-top">
@@ -574,7 +581,7 @@ APP.App = (() => {
       };
     });
     paintOpenLots();
-    refreshOpenLots();
+    if (!state.skipOpenRefresh) refreshOpenLots();
   }
 
   function haTxt(n) {
@@ -585,7 +592,11 @@ APP.App = (() => {
   function paintOpenLots() {
     const box = $("#open-lots");
     if (!box) return;
-    const list = state.openLots || [];
+    const list = (state.openLots || []).filter((r) => {
+      const av = Number(r.avance) || 0;
+      const ar = Number(r.area) || 0;
+      return ar > 0 && av + 0.0005 < ar;
+    });
     if (!list.length) {
       box.hidden = true;
       box.innerHTML = "";
@@ -612,7 +623,10 @@ APP.App = (() => {
     if (!navigator.onLine || !APP.API.openLots) return;
     APP.API.openLots(!!force).then((items) => {
       state.openLots = Array.isArray(items) ? items : [];
-      paintOpenLots();
+      state.openLotsLoaded = true;
+      state.skipOpenRefresh = true;
+      paintDay();
+      state.skipOpenRefresh = false;
     }).catch(() => {});
   }
 

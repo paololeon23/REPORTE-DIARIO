@@ -673,23 +673,51 @@ body.is-desktop .qb-toast {
   background: var(--qb-forest);
   color: #fff;
 }
+.totals:has(#lbl-jarras.is-split) {
+  grid-template-columns: 1fr 1fr;
+}
+.totals:has(#lbl-jarras.is-split) #lbl-jarras {
+  grid-column: 1 / -1;
+}
 .totals #lbl-jarras.is-split {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 2px;
-  white-space: normal;
-  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
 }
 .jar-bit {
   display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 0.68rem;
-  line-height: 1.15;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 52px;
+  padding: 8px 4px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  line-height: 1;
 }
-.jar-bit small { font-weight: 700; opacity: 0.75; }
-.jar-bit b { font-weight: 800; }
+.jar-bit small {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.jar-bit b {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--qb-forest);
+  font-variant-numeric: tabular-nums;
+}
+.jar-bit.is-total {
+  background: var(--mint);
+  border-color: transparent;
+}
 .kpi-split b {
   display: flex;
   flex-direction: column;

@@ -229,6 +229,7 @@ function normalizeRecs_(body) {
 
 function onOpen() {
   try { ensureCosechadoresSheet_(); } catch (e0) {}
+  try { corregirAvanceTardeAcum_(); } catch (eA) {}
   try { aplicarFormulasEnDias_(); } catch (e1) {}
   SpreadsheetApp.getUi()
     .createMenu('Q Berries')
@@ -2010,7 +2011,7 @@ function paintTodayAcumGaps_(sh) {
   for (i = 0; i < n; i++) {
     f = toIsoFecha_(fechas[i][0]);
     if (!f) continue;
-    key = f + '|' + String(lotes[i][0] || '').trim() + '|' + String(cFundo > 0 ? fundos[i][0] : '').toUpperCase();
+    key = String(lotes[i][0] || '').trim() + '|' + String(cFundo > 0 ? fundos[i][0] : '').toUpperCase();
     if (!groups[key]) groups[key] = { rows: [], avance: 0, area: 0 };
     groups[key].rows.push(i + 2);
     groups[key].avance += num(avs[i][0]);
@@ -2056,10 +2057,10 @@ function openLotsToday_() {
     if (!f || f > iso) return;
     var lote = String(row[cLote] || '').trim();
     var fundo = cFundo >= 0 ? String(row[cFundo] || '').trim() : '';
-    var key = f + '|' + lote + '|' + fundo.toUpperCase();
+    var key = lote + '|' + fundo.toUpperCase();
     if (!groups[key]) {
       groups[key] = {
-        fecha: f,
+        fecha: iso,
         lote: lote,
         fundo: fundo,
         modulo: cMod >= 0 ? String(row[cMod] || '').trim() : '',
@@ -2260,4 +2261,56 @@ function mergeAcumuladoFromDeltas_(ss, headers, deltas) {
     sh.getRange(sh.getLastRow() + 1, 1, appends.length, ACUM_HEADERS.length).setValues(appends);
   }
   try { paintTodayAcumGaps_(sh); } catch (ePaint) {}
+  try { corregirAvanceTardeAcum_(sh); } catch (eAv) {}
+}
+
+/** En la tarde el avance guardado a veces viene como el total. Acumulado deja solo la diferencia. */
+function corregirAvanceTardeAcum_(sh) {
+  sh = sh || SpreadsheetApp.getActive().getSheetByName(ACUM);
+  if (!sh || sh.getLastRow() < 2) return 0;
+  var width = Math.max(sh.getLastColumn(), ACUM_HEADERS.length);
+  var head = sh.getRange(1, 1, 1, width).getValues()[0];
+  var cFecha = headerCol_(head, ['Fecha']);
+  var cDni = headerCol_(head, ['Supervisor DNI']);
+  var cTc = headerCol_(head, ['Turno campo']);
+  var cLote = headerCol_(head, ['Lote']);
+  var cAv = headerCol_(head, ['Avance']);
+  var cAr = headerCol_(head, ['Área', 'Area']);
+  var cKg = headerCol_(head, ['Total Kg']);
+  var cHa = headerCol_(head, ['Kg/ha', 'Kg/Ha']);
+  if (cFecha < 0 || cLote < 0 || cAv < 0 || cTc < 0) return 0;
+  var n = sh.getLastRow() - 1;
+  var data = sh.getRange(2, 1, n, width).getValues();
+  var morning = {};
+  var i;
+  for (i = 0; i < data.length; i++) {
+    if (/tarde/i.test(String(data[i][cTc] || ''))) continue;
+    var iso = toIsoFecha_(data[i][cFecha]);
+    var lote = String(data[i][cLote] || '').trim();
+    var dni = cDni >= 0 ? String(data[i][cDni] || '').replace(/\D/g, '').slice(0, 8) : '';
+    if (!iso || !lote) continue;
+    var k = iso + '|' + lote + '|' + dni;
+    morning[k] = Math.round((num(morning[k]) + num(data[i][cAv])) * 1000) / 1000;
+  }
+  var fixed = 0;
+  for (i = 0; i < data.length; i++) {
+    if (!/tarde/i.test(String(data[i][cTc] || ''))) continue;
+    var isoT = toIsoFecha_(data[i][cFecha]);
+    var loteT = String(data[i][cLote] || '').trim();
+    var dniT = cDni >= 0 ? String(data[i][cDni] || '').replace(/\D/g, '').slice(0, 8) : '';
+    var base = morning[isoT + '|' + loteT + '|' + dniT] || 0;
+    var av = num(data[i][cAv]);
+    var area = cAr >= 0 ? num(data[i][cAr]) : 0;
+    if (!(base > 0) || !(av > 0)) continue;
+    if (!(area > 0) || base + av <= area + 0.0001) continue;
+    var delta = Math.round((av - base) * 1000) / 1000;
+    if (delta < 0) delta = 0;
+    sh.getRange(i + 2, cAv + 1).setValue(delta);
+    if (cHa >= 0 && cKg >= 0 && delta > 0) {
+      sh.getRange(i + 2, cHa + 1).setValue(Math.round(num(data[i][cKg]) / delta));
+    }
+    fixed++;
+  }
+  if (fixed) { try { paintTodayAcumGaps_(sh); } catch (e0) {} }
+  return fixed;
 }
