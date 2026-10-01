@@ -851,6 +851,23 @@ APP.API = (() => {
     limaTime,
     pruneOldRecords,
     newClientId: uid,
+    applyPesoToday: (fundo, supervisorDni, peso) => {
+      const day = todayKey();
+      const want = String(fundo || "").trim().toUpperCase();
+      const dni = String(supervisorDni || "").trim();
+      const n = Number(peso);
+      if (!want || !(n > 0)) return;
+      let changed = false;
+      const next = all().map((r) => {
+        if (!r || String(r.fecha) !== day) return r;
+        if (String(r.fundo || "").trim().toUpperCase() !== want) return r;
+        if (dni && String(r.supervisorDni || "").trim() !== dni) return r;
+        if (Number(r.pesoJarra) === n) return r;
+        changed = true;
+        return { ...r, pesoJarra: n };
+      });
+      if (changed) write(next);
+    },
     localRecords,
     recordOf,
     isUploaded: (r) => !!(r && (r.uploaded || r.syncStatus === "confirmed")),

@@ -46,6 +46,13 @@ APP.App = (() => {
     return fundoList().find((f) => String(f).toUpperCase() === s) || "";
   }
 
+  function pesoFijo(fundo) {
+    const f = canonFundo(fundo);
+    if (f === "LICAPA I") return "1.12";
+    if (f === "LICAPA II") return "1.1";
+    return "";
+  }
+
   function dayRecords(fecha, turnoCampo) {
     const day = fecha || today();
     const dni = supDni();
@@ -117,6 +124,73 @@ APP.App = (() => {
       actions.appendChild(cancel);
       actions.appendChild(ok);
       root.hidden = false;
+    });
+  }
+
+  function askPeso(fundo) {
+    return new Promise((resolve) => {
+      const root = $("#qb-fb");
+      const head = $("#qb-fb-title");
+      const body = $("#qb-fb-text");
+      const actions = $("#qb-fb-actions");
+      if (!root || !head || !body || !actions) {
+        resolve("");
+        return;
+      }
+      head.textContent = "Peso de jarra";
+      body.classList.add("is-detail");
+      body.innerHTML =
+        `<span>En ${esc(fundo)} las jarras se multiplican por el peso que elijas.</span>` +
+        `<div class="peso-opts">` +
+        `<button type="button" data-peso="1.12">1.12</button>` +
+        `<button type="button" data-peso="1.1">1.1</button>` +
+        `</div>` +
+        `<label class="peso-otro">Otro<input id="inp-peso-modal" inputmode="decimal" placeholder="1.14" aria-label="Otro peso"></label>`;
+      actions.innerHTML = "";
+      const input = $("#inp-peso-modal");
+      const mark = (value) => {
+        body.querySelectorAll("[data-peso]").forEach((btn) => {
+          btn.classList.toggle("on", btn.dataset.peso === value);
+        });
+      };
+      body.querySelectorAll("[data-peso]").forEach((btn) => {
+        btn.onclick = () => {
+          if (input) input.value = btn.dataset.peso;
+          mark(btn.dataset.peso);
+        };
+      });
+      if (input) {
+        input.addEventListener("input", () => {
+          input.value = sanitizePeso(input.value);
+          mark(input.value);
+        });
+      }
+      const close = (value) => {
+        root.hidden = true;
+        body.classList.remove("is-detail");
+        body.textContent = "";
+        resolve(value || "");
+      };
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancelar";
+      cancel.style.background = "#E8EEE9";
+      cancel.style.color = "#1B5E20";
+      cancel.onclick = () => close("");
+      const ok = document.createElement("button");
+      ok.textContent = "Continuar";
+      ok.onclick = () => {
+        const raw = sanitizePeso(input ? input.value : "");
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) {
+          if (input) input.focus();
+          return;
+        }
+        close(String(n));
+      };
+      actions.appendChild(cancel);
+      actions.appendChild(ok);
+      root.hidden = false;
+      if (input) input.focus();
     });
   }
 
@@ -194,7 +268,7 @@ APP.App = (() => {
       scan.textContent = name || "Seleccionar…";
     }
     if (jn) jn.value = state.session.jornales > 0 ? String(state.session.jornales) : "";
-    if (!state.session.pesoJarra) state.session.pesoJarra = "1.14";
+    if (!state.session.pesoJarra) state.session.pesoJarra = pesoFijo(state.session.fundo) || "";
     paintPeso();
     const fundo = canonFundo(state.session.fundo);
     if (fundo) state.session.fundo = fundo;
@@ -211,15 +285,14 @@ APP.App = (() => {
     const lbl = $("#lbl-turno-campo");
     if (lbl) lbl.textContent = turno;
     const turnoBtn = $("#btn-turno-campo");
-    if (turnoBtn) turnoBtn.disabled = envios >= 1;
+    if (turnoBtn) turnoBtn.disabled = false;
     document.querySelectorAll("#menu-turno-campo [data-turno]").forEach((btn) => {
       const on = btn.dataset.turno === turno;
-      const locked = btn.dataset.turno === "Tarde" && envios < 1;
       btn.classList.toggle("on", on);
-      btn.classList.toggle("is-locked", locked);
-      btn.disabled = locked;
+      btn.classList.remove("is-locked");
+      btn.disabled = false;
       btn.setAttribute("aria-selected", on ? "true" : "false");
-      btn.setAttribute("aria-disabled", locked ? "true" : "false");
+      btn.setAttribute("aria-disabled", "false");
     });
     const env = $("#lbl-envios");
     if (env) env.textContent = envios + " / 2 envíos hoy";
@@ -228,8 +301,7 @@ APP.App = (() => {
   }
 
   function syncTurnoCampo() {
-    const envios = APP.API.sendCount(state.session.supervisorDni);
-    const turno = envios >= 1 ? "Tarde" : "Mañana";
+    const turno = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     if (state.session.turnoCampo !== turno) {
       state.session.turnoCampo = turno;
       persistSession();
@@ -446,44 +518,76 @@ APP.App = (() => {
   }
 
   function pesoNum() {
-    const raw = sanitizePeso(state.session.pesoJarra ?? "1.14");
+    const raw = sanitizePeso(state.session.pesoJarra || "");
     const n = Number(raw.endsWith(".") ? raw.slice(0, -1) : raw);
-    return Number.isFinite(n) && n > 0 ? n : 1.14;
+    if (Number.isFinite(n) && n > 0) return n;
+    const fijo = Number(pesoFijo(state.session.fundo));
+    return fijo > 0 ? fijo : 1.14;
   }
 
   function paintPeso() {
     const el = $("#inp-peso");
     if (!el || document.activeElement === el) return;
-    const v = sanitizePeso(state.session.pesoJarra ?? "1.14");
-    el.value = v || "1.14";
+    el.readOnly = false;
+    el.classList.remove("is-locked");
+    el.value = sanitizePeso(state.session.pesoJarra || "");
+  }
+
+  function usarPeso(fundo, peso) {
+    state.session.pesoJarra = String(peso);
+    APP.API.applyPesoToday(fundo, supDni(), peso);
+    persistSession();
+    paintPeso();
+    paintTotals();
+    paintDay();
   }
 
   function jarrasDe(records) {
     return (records || []).reduce((sum, r) => sum + (Number(APP.Data.derive(r).totalJarras) || 0), 0);
   }
 
-  function paintTotals() {
-    const d = APP.Data.derive(currentData());
-    const j = $("#lbl-jarras");
+  function jarrasAhora() {
+    const conv = state.conv ? Number(state.jarrasConv) || 0 : 0;
+    const china = state.china ? Number(state.jarrasChina) || 0 : 0;
+    return conv + china;
+  }
+
+  function paintLiveKg() {
+    const jarras = jarrasAhora();
+    const kg = APP.Data.round2(jarras * pesoNum());
     const k = $("#lbl-kg");
+    if (k) k.textContent = kg + " kg";
+    const j = $("#lbl-jarras");
+    if (j && j.classList.contains("is-split")) {
+      const bits = j.querySelectorAll("b");
+      const manana = bits[0] ? Number(bits[0].textContent) || 0 : 0;
+      if (bits[1]) bits[1].textContent = String(jarras);
+      if (bits[2]) bits[2].textContent = String(manana + jarras);
+    } else if (j) {
+      j.textContent = jarras + " jarras";
+    }
+    paintSaveBtn();
+  }
+
+  function paintTotals() {
+    const jarras = jarrasAhora();
+    const j = $("#lbl-jarras");
     if (j) {
       const lote = state.lote && state.lote.lote;
       if (isTarde() && lote) {
         const mananaRec = APP.API.recordOf(lote, today(), "Mañana", supDni(), state.session.fundo);
         const manana = mananaRec ? Number(APP.Data.derive(mananaRec).totalJarras) || 0 : 0;
-        const ahora = Number(d.totalJarras) || 0;
         j.classList.add("is-split");
         j.innerHTML =
           `<div class="jar-bit"><small>Mañana</small><b>${manana}</b></div>` +
-          `<div class="jar-bit"><small>Ahora</small><b>${ahora}</b></div>` +
-          `<div class="jar-bit is-total"><small>Total</small><b>${manana + ahora}</b></div>`;
+          `<div class="jar-bit"><small>Ahora</small><b>${jarras}</b></div>` +
+          `<div class="jar-bit is-total"><small>Total</small><b>${manana + jarras}</b></div>`;
       } else {
         j.classList.remove("is-split");
-        j.textContent = d.totalJarras + " jarras";
+        j.textContent = jarras + " jarras";
       }
     }
-    if (k) k.textContent = d.totalKg + " kg";
-    paintSaveBtn();
+    paintLiveKg();
   }
 
   function hasJarrasInput() {
@@ -905,7 +1009,6 @@ APP.App = (() => {
           }
           state.session.supervisorDni = nextDni;
           state.session.supervisorNombre = nextName;
-          state.session.turnoCampo = APP.API.sendCount(nextDni) >= 1 ? "Tarde" : "Mañana";
           state.session.scannerDni = "";
           state.session.scannerNombre = "";
           state.session.jornales = 0;
@@ -1001,15 +1104,7 @@ APP.App = (() => {
       turnoMenu.addEventListener("click", (e) => {
         const opt = e.target.closest("[data-turno]");
         if (!opt) return;
-        if (opt.dataset.turno === "Tarde" && APP.API.sendCount(state.session.supervisorDni) < 1) {
-          closeTurno();
-          return;
-        }
-        if (APP.API.sendCount(state.session.supervisorDni) >= 1) {
-          state.session.turnoCampo = "Tarde";
-        } else {
-          state.session.turnoCampo = "Mañana";
-        }
+        state.session.turnoCampo = opt.dataset.turno === "Tarde" ? "Tarde" : "Mañana";
         persistSession();
         paintPeople();
         paintDay();
@@ -1033,14 +1128,20 @@ APP.App = (() => {
         fundoMenu.hidden = !open;
         fundoBtn.setAttribute("aria-expanded", open ? "true" : "false");
       });
-      fundoMenu.addEventListener("click", (e) => {
+      fundoMenu.addEventListener("click", async (e) => {
         const opt = e.target.closest("[data-fundo]");
         if (!opt) return;
-        state.session.fundo = canonFundo(opt.dataset.fundo);
-        if (state.lote && !APP.Data.findLote(state.lote.lote, state.session.fundo)) resetLoteInputs();
-        persistSession();
-        paintPeople();
+        const next = canonFundo(opt.dataset.fundo);
+        if (!next) return;
         closeFundo();
+        const fijo = pesoFijo(next);
+        let peso = fijo;
+        if (!peso) peso = await askPeso(next);
+        if (!peso) return;
+        state.session.fundo = next;
+        if (state.lote && !APP.Data.findLote(state.lote.lote, state.session.fundo)) resetLoteInputs();
+        usarPeso(next, peso);
+        paintPeople();
       });
       document.addEventListener("click", (e) => {
         if (!$("#sel-fundo")?.contains(e.target)) closeFundo();
@@ -1060,36 +1161,47 @@ APP.App = (() => {
       state.session.pesoJarra = text;
       if (el && el.value !== text) el.value = text;
       persistSession();
-      paintTotals();
+      paintLiveKg();
     });
     on("#inp-peso", "blur", () => {
-      state.session.pesoJarra = String(pesoNum());
+      const n = pesoNum();
+      state.session.pesoJarra = String(n);
       const el = $("#inp-peso");
       if (el) el.value = state.session.pesoJarra;
+      if (state.session.fundo) APP.API.applyPesoToday(state.session.fundo, supDni(), n);
       persistSession();
       paintTotals();
+      paintDay();
     });
     on("#inp-jconv", "input", () => {
       const el = $("#inp-jconv");
-      state.jarrasConv = String(el?.value || "").replace(/\D/g, "");
-      if (el && el.value !== state.jarrasConv) el.value = state.jarrasConv;
-      if (state.jarrasConv && !state.conv) {
+      const raw = String(el?.value || "");
+      const digits = raw.replace(/\D/g, "");
+      state.jarrasConv = digits;
+      if (el && raw !== digits) el.value = digits;
+      if (digits && !state.conv) {
         state.conv = true;
-        paintChecks();
-        return;
+        const chk = $("#chk-conv");
+        const box = $("#box-conv");
+        if (chk) chk.checked = true;
+        if (box) box.hidden = false;
       }
-      paintTotals();
+      paintLiveKg();
     });
     on("#inp-jchina", "input", () => {
       const el = $("#inp-jchina");
-      state.jarrasChina = String(el?.value || "").replace(/\D/g, "");
-      if (el && el.value !== state.jarrasChina) el.value = state.jarrasChina;
-      if (state.jarrasChina && !state.china) {
+      const raw = String(el?.value || "");
+      const digits = raw.replace(/\D/g, "");
+      state.jarrasChina = digits;
+      if (el && raw !== digits) el.value = digits;
+      if (digits && !state.china) {
         state.china = true;
-        paintChecks();
-        return;
+        const chk = $("#chk-china");
+        const box = $("#box-china");
+        if (chk) chk.checked = true;
+        if (box) box.hidden = false;
       }
-      paintTotals();
+      paintLiveKg();
     });
     on("#chk-conv", "change", () => {
       state.conv = !!$("#chk-conv")?.checked;

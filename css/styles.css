@@ -656,6 +656,43 @@ body.is-desktop .qb-toast {
   color: var(--qb-forest);
   font-variant-numeric: tabular-nums;
 }
+.jarra-peso input.is-locked { color: #1B5E20; }
+.peso-opts { display: flex; gap: 8px; }
+.peso-opts button {
+  flex: 1;
+  height: 44px;
+  border-radius: 12px;
+  background: #F3F8F4;
+  color: #1B5E20;
+  font-weight: 800;
+  font-size: 1rem;
+}
+.peso-opts button.on {
+  background: #1B5E20;
+  color: #fff;
+}
+.peso-otro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7A8A7E;
+}
+.peso-otro input {
+  flex: 1;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  text-align: center;
+  font-weight: 800;
+  font-size: 1rem;
+  color: #111;
+  text-transform: none;
+  letter-spacing: 0;
+}
 .totals-hint {
   margin: 0;
   color: var(--muted);

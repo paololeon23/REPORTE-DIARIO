@@ -180,9 +180,11 @@ APP.Data = (() => {
 
   function etapaKind(etapa) {
     const e = String(etapa || "").trim().toUpperCase();
+    if (/\bIV\b/.test(e) || e.endsWith(" IV")) return "IV";
+    if (/\bIII\b/.test(e) || e.endsWith(" III") || e.includes("III")) return "III";
     if (/\bII\b/.test(e) || e.endsWith(" II")) return "II";
     if (e.includes("II") && !e.includes("III")) return "II";
-    if (e.includes("I") || e.includes("LICAPA")) return "I";
+    if (/\bI\b/.test(e) || e.endsWith(" I") || e.includes("LICAPA")) return "I";
     return "";
   }
 
@@ -242,7 +244,7 @@ APP.Data = (() => {
       const num = String(l.lote ?? "").trim();
       if (!num) return;
       const kind = etapaKind(l.etapa) || "I";
-      const etapaLabel = kind === "II" ? "Licapa II" : kind === "I" ? "Licapa I" : String(l.etapa || "").trim();
+      const etapaLabel = kind === "IV" ? "Licapa IV" : kind === "III" ? "Licapa III" : kind === "II" ? "Licapa II" : "Licapa I";
       const slot = compactLoteId(num) + "|" + kind;
       if (lotesById[slot]) return;
       const entry = normalizeLote({ ...l, lote: num, etapa: etapaLabel });
@@ -258,18 +260,30 @@ APP.Data = (() => {
     const bare = key.replace(/^Q/i, "");
     const compact = compactLoteId(bare);
     const kind = fundoKind(fundo);
-    if (kind) return lotesById[bare + "|" + kind] || lotesById[compact + "|" + kind] || null;
+    if (kind === "I" || kind === "II") return lotesById[bare + "|" + kind] || lotesById[compact + "|" + kind] || null;
+    if (kind === "III" || kind === "IV") {
+      return lotesById[bare + "|" + kind]
+        || lotesById[compact + "|" + kind]
+        || lotesById[bare + "|I"]
+        || lotesById[compact + "|I"]
+        || lotesById[bare + "|II"]
+        || lotesById[compact + "|II"]
+        || null;
+    }
     return lotesById[key] || lotesById[bare] || lotesById[compact] || lotesById["Q" + bare] || null;
   }
 
   function loteOptions(query, fundo) {
     const s = String(query || "").trim().toLowerCase();
     const kind = fundoKind(fundo);
+    const hasOwn = kind === "III" || kind === "IV"
+      ? lotes.some((l) => etapaKind(l.etapa) === kind)
+      : !!kind;
     const out = [];
     const limit = s ? 40 : 32;
     for (let i = 0; i < lotes.length; i++) {
       const l = lotes[i];
-      if (kind && etapaKind(l.etapa) !== kind) continue;
+      if (hasOwn && etapaKind(l.etapa) !== kind) continue;
       const loteStr = String(l.lote).toLowerCase();
       if (s) {
         const hay = `${l.lote} ${l.md} ${l.modulo} ${l.turno} ${l.variedad} ${l.etapa} ${l.codLote}`.toLowerCase();
