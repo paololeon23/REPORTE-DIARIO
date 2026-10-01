@@ -45,18 +45,28 @@ APP.Excel = (() => {
     const records = (opts.records || [])
       .filter((r) => r && String(r.lote || "").trim())
       .slice()
-      .sort((a, b) => String(a.lote).localeCompare(String(b.lote), "es", { numeric: true }));
+      .sort((a, b) => {
+        const c = String(a.lote).localeCompare(String(b.lote), "es", { numeric: true });
+        if (c) return c;
+        const ta = (a.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
+        const tb = (b.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
+        return ta - tb;
+      });
 
-    const rows = records.map((rec) => {
+    const rows = [];
+    const byLot = {};
+    records.forEach((rec) => {
       const L = APP.Data.findLote(rec.lote, rec.fundo) || {};
       const d = APP.Data.derive(rec);
-      return {
+      const key = String(rec.lote) + "|" + String(rec.fundo || L.fundo || "").trim().toUpperCase();
+      const piece = {
         fundo: rec.fundo || L.fundo || "",
         variedad: L.variedad || rec.variedad || "",
         md: L.md || rec.md || "",
         lote: rec.lote,
         turno: L.turno || rec.turno || "",
-        area: Number(rec.avance || rec.area || L.area) || 0,
+        area: Number(rec.avance) || 0,
+        partes: [Number(rec.avance) || 0],
         jarrasConv: d.jarrasConv,
         kgConv: d.kgConvEff,
         jarrasChina: d.jarrasChina,
@@ -65,6 +75,20 @@ APP.Excel = (() => {
         totalKg: d.totalKg,
         filled: true,
       };
+      const prev = byLot[key];
+      if (!prev) {
+        byLot[key] = piece;
+        rows.push(piece);
+        return;
+      }
+      prev.area = Math.round((Number(prev.area) + piece.area) * 1000) / 1000;
+      prev.partes = (prev.partes || []).concat(piece.partes || []);
+      prev.jarrasConv += piece.jarrasConv;
+      prev.kgConv = APP.Data.round2(prev.kgConv + piece.kgConv);
+      prev.jarrasChina += piece.jarrasChina;
+      prev.kgChina = APP.Data.round2(prev.kgChina + piece.kgChina);
+      prev.totalJarras += piece.totalJarras;
+      prev.totalKg = APP.Data.round2(prev.totalKg + piece.totalKg);
     });
 
     const sumArea = rows.reduce((a, r) => a + (Number(r.area) || 0), 0);

@@ -533,6 +533,12 @@ body.is-desktop .qb-toast {
   background: #1B5E20;
   color: #fff;
 }
+.turno-select-opt.is-locked,
+.turno-select-opt:disabled {
+  opacity: 0.4;
+  color: #8A938E;
+  background: #F4F6F5;
+}
 .field-num {
   display: grid; gap: 4px;
 }
@@ -570,10 +576,15 @@ body.is-desktop .qb-toast {
   display: block;
   font-style: normal;
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: 600;
   color: #9A5B00;
 }
+.avance-min b {
+  font-weight: 800;
+  color: #111;
+}
 .avance-min.is-gap { color: #B71C1C; }
+.avance-min .falta { color: #B71C1C; font-weight: 700; }
 .avance-min[hidden] { display: none; }
 .lote-extra {
   color: var(--muted);
@@ -581,8 +592,8 @@ body.is-desktop .qb-toast {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  min-height: 1.1em;
 }
+.lote-extra[hidden] { display: none; }
 .check-label {
   font-weight: 800;
   font-size: 0.72rem;
@@ -839,6 +850,9 @@ body.is-desktop .qb-toast {
 .lot-badge.is-local {
   color: #5A655E;
   background: #E8EEE9;
+  padding: 3px 6px;
+  font-size: 0.5rem;
+  letter-spacing: 0.04em;
 }
 .lot-grid {
   display: grid;
@@ -871,6 +885,20 @@ body.is-desktop .qb-toast {
 }
 .lot-item.is-short .lot-cell.is-warn b { color: #B71C1C; }
 .lot-item.is-ok .lot-cell b { color: #1B5E20; }
+.lot-cell .av-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.lot-item .lot-cell .av-sum {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #5A655E;
+  line-height: 1.15;
+  white-space: nowrap;
+}
 .lot-acts {
   display: grid;
   grid-auto-flow: row;
@@ -1381,6 +1409,15 @@ body.is-desktop .qb-toast {
   text-align: center;
 }
 .guide-table td.num { font-variant-numeric: tabular-nums; }
+.guide-table td.loc { font-weight: 600; }
+.guide-table td.loc b { font-weight: 800; }
+.guide-table td.loc .loc-sum {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #5A655E;
+}
 .guide-table .empty-row {
   text-align: center;
   color: #7A8A7E;
@@ -1439,7 +1476,7 @@ body.is-desktop .qb-toast {
 }
 .export-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 .export-choice {

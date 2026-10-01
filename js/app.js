@@ -214,8 +214,12 @@ APP.App = (() => {
     if (turnoBtn) turnoBtn.disabled = envios >= 1;
     document.querySelectorAll("#menu-turno-campo [data-turno]").forEach((btn) => {
       const on = btn.dataset.turno === turno;
+      const locked = btn.dataset.turno === "Tarde" && envios < 1;
       btn.classList.toggle("on", on);
+      btn.classList.toggle("is-locked", locked);
+      btn.disabled = locked;
       btn.setAttribute("aria-selected", on ? "true" : "false");
+      btn.setAttribute("aria-disabled", locked ? "true" : "false");
     });
     const env = $("#lbl-envios");
     if (env) env.textContent = envios + " / 2 envíos hoy";
@@ -246,11 +250,6 @@ APP.App = (() => {
   function avanceParaGuardar() {
     const typed = Number(state.avance) || 0;
     if (state.cierre) return typed > 0 ? String(typed) : "";
-    if (isTarde() && state.lote) {
-      const morning = morningAvanceOf(state.lote.lote);
-      const delta = Math.round((typed - morning) * 1000) / 1000;
-      return delta > 0 ? String(delta) : "";
-    }
     return state.avance || "";
   }
 
@@ -271,13 +270,16 @@ APP.App = (() => {
       const left = Math.round(((Number(state.cierre.area) || 0) - hechoHa()) * 1000) / 1000;
       return left > 0 ? left : 0;
     }
-    return loteAreaMax();
+    const area = loteAreaMax();
+    if (isTarde() && state.lote && area != null) {
+      const left = Math.round((area - morningAvanceOf(state.lote.lote)) * 1000) / 1000;
+      return left > 0 ? left : 0;
+    }
+    return area;
   }
 
   function avanceFloor() {
-    if (state.cierre) return 0;
-    if (!isTarde() || !state.lote) return 0;
-    return morningAvanceOf(state.lote.lote);
+    return 0;
   }
 
   function paintAvanceHint() {
@@ -289,19 +291,20 @@ APP.App = (() => {
       const hecho = hechoHa();
       const left = faltaHa();
       hint.hidden = false;
-      const base = `Se trabajó ${haTxt(hecho)} ha.`;
+      const base = `<b>Se trabajó ${haTxt(hecho)} ha.</b>`;
+      const falta = (n) => `<span class="falta">Falta ${haTxt(n)} ha.</span>`;
       if (left > 0) {
         hint.classList.remove("is-gap");
-        hint.textContent = `${base} Falta ${haTxt(left)} ha.`;
+        hint.innerHTML = `${base} ${falta(left)}`;
       } else if (left < 0) {
         hint.classList.add("is-gap");
-        hint.textContent = `${base} Supera el área por ${haTxt(Math.abs(left))} ha.`;
+        hint.innerHTML = `${base} Supera el área por ${haTxt(Math.abs(left))} ha.`;
       } else if (Number(state.avance) > 0) {
         hint.classList.remove("is-gap");
-        hint.textContent = `${base} Con esto se completa el área.`;
+        hint.innerHTML = `${base} Con esto se completa el área.`;
       } else {
         hint.classList.remove("is-gap");
-        hint.textContent = `${base} Falta 0 ha.`;
+        hint.innerHTML = `${base} ${falta(0)}`;
       }
       if (lab) lab.textContent = "Lo que avanzas ahora (ha)";
       if (inp) inp.placeholder = "Solo lo de ahora";
@@ -310,10 +313,10 @@ APP.App = (() => {
     hint.classList.remove("is-gap");
     if (lab) lab.textContent = "Avance (ha)";
     if (inp && document.activeElement !== inp) inp.placeholder = "0";
-    const floor = avanceFloor();
-    if (floor > 0) {
+    const morning = isTarde() && state.lote ? morningAvanceOf(state.lote.lote) : 0;
+    if (morning > 0) {
       hint.hidden = false;
-      hint.textContent = `Avance de la mañana: ${floor} ha. En la tarde solo se puede agregar más.`;
+      hint.textContent = `Avance de la mañana: ${morning} ha. Aquí solo lo de la tarde.`;
       return;
     }
     const max = loteAreaMax();
@@ -334,10 +337,10 @@ APP.App = (() => {
     const recAv = rec ? Number(rec.avance) : 0;
     const areaLot = Number(L && L.area) || 0;
     const looksCumulative = floor > 0 && recAv >= floor && areaLot > 0 && floor + recAv > areaLot + 0.0001;
-    if (isTarde() && rec && Number.isFinite(recAv) && recAv > 0 && !looksCumulative) {
-      state.avance = String(Math.round((floor + recAv) * 1000) / 1000);
+    if (isTarde()) {
+      const delta = looksCumulative ? Math.round((recAv - floor) * 1000) / 1000 : recAv;
+      state.avance = delta > 0 ? String(delta) : "";
     } else if (rec && Number.isFinite(recAv) && recAv > 0) state.avance = String(rec.avance);
-    else if (floor > 0) state.avance = String(floor);
     else state.avance = "";
     state.jarrasConv = rec ? String(rec.jarrasConv || "") : "";
     state.jarrasChina = rec ? String(rec.jarrasChina || "") : "";
@@ -359,11 +362,14 @@ APP.App = (() => {
     $("#lbl-md").textContent = L ? L.modulo || L.md || "—" : "—";
     $("#lbl-turno").textContent = L ? L.turno : "—";
     $("#lbl-area").textContent = L && L.area !== "" && L.area != null ? `${L.area} ha` : "—";
-    $("#lbl-extra").textContent = L
+    const extra = $("#lbl-extra");
+    const extraTxt = L
       ? [L.fundo, L.variedad, L.codLote, L.etapa, L.grupo ? "Grupo " + L.grupo : ""]
           .filter(Boolean)
           .join(" · ")
       : "";
+    extra.textContent = extraTxt;
+    extra.hidden = !extraTxt;
   }
 
   function loteAreaMax() {
@@ -385,7 +391,8 @@ APP.App = (() => {
     if (max != null && n > max) return { text: String(max), num: max, capped: true };
     const floor = avanceFloor();
     if (floor > 0 && n < floor) return { text: String(floor), num: floor, floored: true };
-    return { text: finish ? String(n) : s, num: n };
+    const text = finish && s.endsWith(".") ? s.slice(0, -1) : s;
+    return { text: text, num: n };
   }
 
   function applyAvance(raw, finish) {
@@ -521,30 +528,62 @@ APP.App = (() => {
       <div><small>Área</small><strong>${t.area} ha</strong></div>
       ${jarrasKpi}
       <div><small>Kg</small><strong>${t.totalKg}</strong></div>`;
-    $("#lot-list").innerHTML = records.length
-      ? records
-          .map((r) => {
-            const d = APP.Data.derive(r);
-            const L = APP.Data.findLote(r.lote, r.fundo) || {};
-            const tc = r.turnoCampo || "Mañana";
-            const area = L.area !== "" && L.area != null ? L.area : (r.area !== "" && r.area != null ? r.area : "—");
-            const avance = r.avance !== "" && r.avance != null ? r.avance : "—";
+    const groups = [];
+    const grouped = {};
+    records.forEach((r) => {
+      const key = String(r.lote) + "|" + String(r.fundo || "").trim().toUpperCase();
+      if (!grouped[key]) {
+        grouped[key] = [];
+        groups.push(grouped[key]);
+      }
+      grouped[key].push(r);
+    });
+    $("#lot-list").innerHTML = groups.length
+      ? groups
+          .map((parts) => {
+            const r0 = parts[0];
+            const L = APP.Data.findLote(r0.lote, r0.fundo) || {};
+            const area = L.area !== "" && L.area != null ? L.area : (r0.area !== "" && r0.area != null ? r0.area : "—");
+            let avanceN = 0;
+            let jarras = 0;
+            let kg = 0;
+            let allUp = true;
+            parts.forEach((r) => {
+              avanceN += Number(r.avance) || 0;
+              const d = APP.Data.derive(r);
+              jarras += d.totalJarras;
+              kg += d.totalKg;
+              if (!APP.API.isUploaded(r)) allUp = false;
+            });
+            avanceN = Math.round(avanceN * 1000) / 1000;
+            kg = APP.Data.round2(kg);
+            const ordered = parts.slice().sort((a, b) => {
+              const ta = (a.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
+              const tb = (b.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
+              return ta - tb;
+            });
+            const bits = ordered
+              .map((r) => Math.round((Number(r.avance) || 0) * 1000) / 1000)
+              .filter((n) => n > 0);
+            const sumaTxt = bits.length > 1 ? bits.join(" + ") : "";
             const areaN = Number(area);
-            const avN = Number(avance);
-            const faltaLocal = Number.isFinite(areaN) && areaN > 0 && !(Number.isFinite(avN) && avN >= areaN);
-            const subido = APP.API.isUploaded(r);
-            const sigueAbierto = (state.openLots || []).some((o) => String(o.lote) === String(r.lote));
-            const falta = subido && state.openLotsLoaded ? sigueAbierto : faltaLocal;
+            const falta = Number.isFinite(areaN) && areaN > 0 && avanceN + 0.0005 < areaN;
+            const tcNow = isTarde() ? "Tarde" : "Mañana";
+            const editPart = parts.find((r) => (r.turnoCampo || "Mañana") === tcNow)
+              || parts.find((r) => !APP.API.isUploaded(r))
+              || r0;
+            const delPart = parts.find((r) => (r.turnoCampo || "Mañana") === tcNow && !APP.API.isUploaded(r))
+              || parts.find((r) => !APP.API.isUploaded(r));
             return `<div class="lot-row">
-              <article class="lot-item${falta ? " is-short" : " is-ok"}" data-lote="${esc(r.lote)}" data-tc="${tc}">
+              <article class="lot-item${falta ? " is-short" : " is-ok"}" data-lote="${esc(r0.lote)}">
                 <div class="lot-top">
-                  <strong class="lot-kg-line">${d.totalJarras} jarras - ${d.totalKg} kg</strong>
-                  ${subido ? `<span class="lot-badge">Subido</span>` : `<span class="lot-badge is-local">Guardado</span>`}
+                  <strong class="lot-kg-line">${jarras} jarras - ${kg} kg</strong>
+                  ${allUp ? `<span class="lot-badge">Subido</span>` : `<span class="lot-badge is-local">Guardado local</span>`}
                 </div>
                 <div class="lot-grid">
                   <div class="lot-cell">
                     <em>Lote</em>
-                    <b>${esc(r.lote)}</b>
+                    <b>${esc(r0.lote)}</b>
                   </div>
                   <div class="lot-cell">
                     <em>Área</em>
@@ -552,15 +591,15 @@ APP.App = (() => {
                   </div>
                   <div class="lot-cell${falta ? " is-warn" : ""}">
                     <em>Avance</em>
-                    <b>${esc(avance)}</b>
+                    <b class="av-line"><span>${esc(avanceN)}</span>${sumaTxt ? `<span class="av-sum">${esc(sumaTxt)}</span>` : ""}</b>
                   </div>
                 </div>
               </article>
               <div class="lot-acts">
-                <button type="button" class="lot-act edit" data-edit="${esc(r.lote)}" data-tc="${tc}" data-fundo="${esc(r.fundo || "")}" aria-label="Editar">
+                <button type="button" class="lot-act edit" data-edit="${esc(editPart.lote)}" data-tc="${esc(editPart.turnoCampo || "Mañana")}" data-fundo="${esc(editPart.fundo || "")}" aria-label="Editar">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
                 </button>
-                <button type="button" class="lot-act del" data-del="${esc(r.lote)}" data-tc="${tc}" data-fundo="${esc(r.fundo || "")}" aria-label="Eliminar"${subido ? " disabled" : ""}>
+                <button type="button" class="lot-act del" data-del="${esc((delPart || editPart).lote)}" data-tc="${esc((delPart || editPart).turnoCampo || "Mañana")}" data-fundo="${esc((delPart || editPart).fundo || "")}" aria-label="Eliminar"${delPart ? "" : " disabled"}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
                 </button>
               </div>
@@ -702,6 +741,19 @@ APP.App = (() => {
     });
     if (!L || !rec) return;
     fillLoteForm(L, rec);
+    scrollToLote();
+  }
+
+  function scrollToLote() {
+    const scroller = document.querySelector(".panel-scroll");
+    const card = $("#lote-card");
+    if (!card) return;
+    if (scroller) {
+      const y = card.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      scroller.scrollTo({ top: Math.max(0, y - 8), behavior: "smooth" });
+      return;
+    }
+    card.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   function resetLoteInputs() {
@@ -949,10 +1001,14 @@ APP.App = (() => {
       turnoMenu.addEventListener("click", (e) => {
         const opt = e.target.closest("[data-turno]");
         if (!opt) return;
+        if (opt.dataset.turno === "Tarde" && APP.API.sendCount(state.session.supervisorDni) < 1) {
+          closeTurno();
+          return;
+        }
         if (APP.API.sendCount(state.session.supervisorDni) >= 1) {
           state.session.turnoCampo = "Tarde";
         } else {
-          state.session.turnoCampo = opt.dataset.turno === "Tarde" ? "Tarde" : "Mañana";
+          state.session.turnoCampo = "Mañana";
         }
         persistSession();
         paintPeople();
@@ -1067,7 +1123,6 @@ APP.App = (() => {
       if (e.target === $("#qb-export")) closeExport();
     });
     click("#btn-export-share", exportShare);
-    click("#btn-export-dl", exportDownload);
     click("#btn-export-send", () => {
       closeExport();
       transferMode();
@@ -1170,21 +1225,15 @@ APP.App = (() => {
       preview.insertAdjacentElement("afterend", send);
     }
     let share = $("#btn-export-share");
-    let dl = $("#btn-export-dl");
+    const dl = $("#btn-export-dl");
+    if (dl) dl.remove();
     if (!share) {
       share = document.createElement("button");
       share.type = "button";
       share.id = "btn-export-share";
     }
-    if (!dl) {
-      dl = document.createElement("button");
-      dl.type = "button";
-      dl.id = "btn-export-dl";
-    }
     share.className = "export-choice";
     share.textContent = "Exportar";
-    dl.className = "export-choice ghost";
-    dl.textContent = "Descargar";
     let row = share.closest(".export-row");
     if (!row) {
       row = document.createElement("div");
@@ -1192,13 +1241,11 @@ APP.App = (() => {
       send.insertAdjacentElement("afterend", row);
     }
     if (share.parentElement !== row) row.appendChild(share);
-    if (dl.parentElement !== row) row.appendChild(dl);
     send.onclick = () => {
       closeExport();
       transferMode();
     };
     share.onclick = exportShare;
-    dl.onclick = exportDownload;
   }
 
   function openExport() {
@@ -1228,11 +1275,13 @@ APP.App = (() => {
       ? rows
           .map((r) => {
             const area = r.area !== "" && r.area != null ? r.area : "—";
-            const loc = `M${esc(r.md || "—")} · T${esc(r.turno || "—")} · ${esc(area)} ha`;
+            const partes = (r.partes || []).filter((n) => Number(n) > 0);
+            const suma = partes.length > 1 ? partes.join(" + ") : "";
+            const loc = `M${esc(r.md || "—")} · T${esc(r.turno || "—")} - <b>${esc(area)}</b> ha${suma ? `<span class="loc-sum">${esc(suma)}</span>` : ""}`;
             return `<tr>
               <td>${esc(r.variedad || "—")}</td>
               <td>${esc(r.lote)}</td>
-              <td>${loc}</td>
+              <td class="loc">${loc}</td>
               <td class="num">${esc(r.totalJarras)}</td>
               <td class="num">${esc(r.totalKg)}</td>
             </tr>`;
@@ -1263,7 +1312,7 @@ APP.App = (() => {
             <tr>
               <th>Variedad</th>
               <th>Lote</th>
-              <th>M · T · Área</th>
+              <th>M · T - Área</th>
               <th>Jarras</th>
               <th>Kg</th>
             </tr>
@@ -1584,6 +1633,10 @@ APP.App = (() => {
       }
 
       rememberExcel(null, "Mañana");
+      resetLoteInputs();
+      persistSession();
+      paintPeople();
+      paintDay();
       paintHistorial();
       paintStatus();
       toast("Se envió.");

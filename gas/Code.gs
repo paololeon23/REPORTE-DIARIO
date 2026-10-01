@@ -20,6 +20,7 @@ var RESP_HEADERS = [
   'Fecha', 'Supervisor', 'Supervisor DNI', 'Turno campo', 'Fundo', 'Jarras', 'Kilos', 'Hora registro'
 ];
 var ACUM = 'Acumulado';
+var TABLA = 'Tabla dinámica';
 var ACUM_HEADERS = [
   'Fecha', 'Semana', 'Supervisor', 'Supervisor DNI', 'Turno campo',
   'Fundo', 'Variedad', 'Módulo', 'Lote', 'Turno', 'Avance', 'Área',
@@ -96,9 +97,9 @@ function applyMergeDeltas_(deltas) {
   var sh = logSheet_(ss);
   var headers = ensureHeaders_(sh);
   try { dropReporteSheets_(ss); } catch (e0) {}
-  try { mergeDaysFromDeltas_(ss, headers, deltas, sh); } catch (e1) {}
   try { mergeResponsablesFromDeltas_(ss, headers, deltas); } catch (e2) {}
   try { mergeAcumuladoFromDeltas_(ss, headers, deltas); } catch (e3) {}
+  try { keepOnlyThreeSheets_(ss); } catch (e4) {}
   SpreadsheetApp.flush();
 }
 
@@ -189,7 +190,6 @@ function runSaveSelfTest_() {
 
     // Merge visible
     try {
-      mergeDaysFromDeltas_(ss, headers, r2.deltas, sh);
       mergeResponsablesFromDeltas_(ss, headers, r2.deltas);
       mergeAcumuladoFromDeltas_(ss, headers, r2.deltas);
       SpreadsheetApp.flush();
@@ -228,17 +228,44 @@ function normalizeRecs_(body) {
 }
 
 function onOpen() {
-  try { ensureCosechadoresSheet_(); } catch (e0) {}
   try { corregirAvanceTardeAcum_(); } catch (eA) {}
-  try { aplicarFormulasEnDias_(); } catch (e1) {}
+  try { keepOnlyThreeSheets_(); } catch (eK) {}
   SpreadsheetApp.getUi()
     .createMenu('Q Berries')
-    .addItem('Crear hoja Cosechadores', 'crearHojaCosechadores')
+    .addItem('Dejar solo 3 hojas', 'keepOnlyThreeSheets')
     .addItem('Actualizar resumen', 'rebuildResumen')
     .addItem('Corregir kilos (decimales)', 'corregirKilosDecimales')
     .addItem('Preparar hojas', 'setupSheets')
     .addItem('Probar guardado POST', 'runSaveSelfTestMenu_')
     .addToUi();
+}
+
+/** Visibles: Responsables, Acumulado y Tabla - reporte. _lotes queda oculta. */
+function keepOnlyThreeSheets(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  keepOnlyThreeSheets_(ss);
+  try {
+    SpreadsheetApp.getUi().alert('Quedan Responsables, Acumulado y Tabla - reporte.');
+  } catch (e) {}
+}
+
+function isKeptSheet_(name) {
+  var n = String(name || '').trim();
+  if (n === RESP || n === ACUM || n === LOG) return true;
+  if (/^tabla/i.test(n) && n !== TABLA) return true;
+  return false;
+}
+
+function keepOnlyThreeSheets_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  try { ensureRespSheet_(ss); } catch (eR) {}
+  try { ensureAcumuladoSheet_(ss); } catch (eA) {}
+  ss.getSheets().slice().forEach(function (s) {
+    if (isKeptSheet_(s.getName())) return;
+    if (ss.getSheets().length <= 1) return;
+    try { ss.deleteSheet(s); } catch (e) {}
+  });
+  hideLogSheet_(ss);
 }
 
 /** Solo crea la pestaña Cosechadores y deja las fórmulas del día. No reescribe kilos ni áreas. */
@@ -263,12 +290,22 @@ function runSaveSelfTestMenu_() {
   );
 }
 
+function hideLogSheet_(ss) {
+  ss = ss || SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(LOG);
+  if (!sh) return;
+  if (sh.isSheetHidden()) return;
+  var visible = ss.getSheets().filter(function (s) { return !s.isSheetHidden() && s.getSheetId() !== sh.getSheetId(); });
+  if (!visible.length) return;
+  try { sh.hideSheet(); } catch (e) {}
+}
+
 function logSheet_(ss) {
   ss = ss || SpreadsheetApp.getActive();
   migrateProduccion_(ss);
   var sh = ss.getSheetByName(LOG);
   if (!sh) sh = ss.insertSheet(LOG);
-  try { sh.hideSheet(); } catch (e) {}
+  hideLogSheet_(ss);
   return sh;
 }
 
@@ -294,12 +331,12 @@ function migrateProduccion_(ss) {
 
 function setupSheets() {
   var ss = SpreadsheetApp.getActive();
-  ensureCosechadoresSheet_(ss);
   var sh = logSheet_(ss);
   ensureHeaders_(sh);
   ensureRespSheet_(ss);
   ensureAcumuladoSheet_(ss);
   rebuildResumen();
+  keepOnlyThreeSheets_(ss);
 }
 
 function ensureHeaders_(sh) {
@@ -713,7 +750,6 @@ function letraCol_(n) {
 /** Reparte el 241 en Jornales. Kg/Jornales queda 32. Busca la columna por su nombre. */
 function ponerFormulasDia_(sh, n) {
   if (!sh || !n) return;
-  ensureCosechadoresSheet_();
   var last = n + 1;
   var tot = n + 2;
   var cArea = colDia_(sh, ['área', 'area'], 12);
@@ -1824,6 +1860,95 @@ function corregirKilosDecimales() {
     'Responsables usados: ' + r.resp + '\nFilas de Acumulado: ' + r.acum + '\nHojas del día: ' + r.days,
     SpreadsheetApp.getUi().ButtonSet.OK
   );
+}
+
+function crearTablaDinamica() {
+  var sh = ensureTablaDinamica_(SpreadsheetApp.getActive(), true);
+  if (sh) sh.activate();
+  SpreadsheetApp.getUi().alert(
+    'Lista la tabla dinámica.\n\nLee solo Acumulado: Semana, Fecha, Módulo, Fundo, Turno, Avances - Area, Total Jarras y Total Kg.'
+  );
+}
+
+/** Tabla dinámica de Acumulado. Si ya cubre todas las filas, no la reconstruye. */
+function ensureTablaDinamica_(ss, force) {
+  ss = ss || SpreadsheetApp.getActive();
+  var acum = ss.getSheetByName(ACUM);
+  if (!acum) return null;
+  var sh = ss.getSheetByName(TABLA);
+  if (sh && !force && tablaCovers_(sh, acum)) return sh;
+  return buildTablaPivot_(ss, acum);
+}
+
+function tablaStamp_(acum) {
+  return String(acum.getLastRow()) + 'x' + String(acum.getLastColumn());
+}
+
+function tablaCovers_(sh, acum) {
+  try {
+    var pivots = sh.getPivotTables();
+    if (!pivots || !pivots.length) return false;
+  } catch (e0) {
+    return false;
+  }
+  return PropertiesService.getScriptProperties().getProperty('tabla_src') === tablaStamp_(acum);
+}
+
+function buildTablaPivot_(ss, acum) {
+  var guard = null;
+  var old = ss.getSheetByName(TABLA);
+  if (old) {
+    if (ss.getSheets().length < 2) guard = ss.insertSheet('_tmp_tabla');
+    ss.deleteSheet(old);
+  }
+  var sh = ss.insertSheet(TABLA);
+  if (guard && ss.getSheets().length > 1) {
+    try { ss.deleteSheet(guard); } catch (eG) {}
+  }
+  placeAfterSheet_(ss, sh, ACUM);
+  sh.setTabColor('#1B5E20');
+
+  var lastRow = Math.max(acum.getLastRow(), 1);
+  var lastCol = Math.max(acum.getLastColumn(), 1);
+  var head = acum.getRange(1, 1, 1, lastCol).getValues()[0];
+  function col(names) {
+    var i = headerCol_(head, names);
+    return i >= 0 ? i + 1 : 0;
+  }
+  var cSem = col(['Semana']);
+  var cFecha = col(['Fecha']);
+  var cMod = col(['Módulo', 'Modulo']);
+  var cFundo = col(['Fundo']);
+  var cTurno = col(['Turno']);
+  var cAv = col(['Avance']);
+  var cJ = col(['Total Jarras']);
+  var cK = col(['Total Kg']);
+  var titles = ['Semana', 'Fecha', 'Módulo', 'Fundo', 'Turno', 'Avances - Area', 'Total Jarras', 'Total Kg'];
+  if (!cSem || !cFecha || !cMod || !cFundo || !cTurno || !cAv || !cJ || !cK || lastRow < 2) {
+    sh.getRange(1, 1, 1, titles.length).setValues([titles]).setFontWeight('bold').setBackground('#F3F3F3');
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  var pivot = sh.getRange(1, 1).createPivotTable(acum.getRange(1, 1, lastRow, lastCol));
+  [cSem, cFecha, cMod, cFundo, cTurno].forEach(function (c) {
+    var g = pivot.addRowGroup(c);
+    try { g.showTotals(false); } catch (e1) {}
+    try { g.showRepeatedLabels(); } catch (e2) {}
+    try { g.sortAscending(); } catch (e3) {}
+  });
+  pivot.addPivotValue(cAv, SpreadsheetApp.PivotTableSummarizeFunction.SUM).setDisplayName('Avances - Area');
+  pivot.addPivotValue(cJ, SpreadsheetApp.PivotTableSummarizeFunction.SUM).setDisplayName('Total Jarras');
+  pivot.addPivotValue(cK, SpreadsheetApp.PivotTableSummarizeFunction.SUM).setDisplayName('Total Kg');
+
+  [80, 110, 90, 110, 70, 140, 120, 110].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  try {
+    sh.getRange('F:F').setNumberFormat('0.00');
+    sh.getRange('G:G').setNumberFormat('#,##0');
+    sh.getRange('H:H').setNumberFormat('#,##0.00');
+  } catch (eF) {}
+  PropertiesService.getScriptProperties().setProperty('tabla_src', tablaStamp_(acum));
+  return sh;
 }
 
 function rebuildResumen() {

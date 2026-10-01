@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.27" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.27" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.42" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.42" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -154,7 +154,7 @@
           </button>
           <div class="turno-select-menu" id="menu-turno-campo" role="listbox" hidden>
             <button type="button" class="turno-select-opt on" data-turno="Mañana" role="option" aria-selected="true">Mañana</button>
-            <button type="button" class="turno-select-opt" data-turno="Tarde" role="option" aria-selected="false">Tarde</button>
+            <button type="button" class="turno-select-opt is-locked" data-turno="Tarde" role="option" aria-selected="false" aria-disabled="true" disabled>Tarde</button>
           </div>
         </div>
       </section>
@@ -173,7 +173,7 @@
           <div><small>Turno</small><strong id="lbl-turno">—</strong></div>
           <div><small>Área</small><strong id="lbl-area">—</strong></div>
         </div>
-        <p class="lote-extra" id="lbl-extra"></p>
+        <p class="lote-extra" id="lbl-extra" hidden></p>
         <label class="field-num">
           <small id="lbl-avance">Avance (ha)</small>
           <input id="inp-avance" inputmode="decimal" placeholder="0" />
@@ -296,7 +296,6 @@
       <button type="button" class="export-send" id="btn-export-send">Enviar</button>
       <div class="export-row">
         <button type="button" class="export-choice" id="btn-export-share">Exportar</button>
-        <button type="button" class="export-choice ghost" id="btn-export-dl">Descargar</button>
       </div>
       <p class="export-hint">Enviar manda el total del reporte más cada lote. Si no hay señal, queda 1 pendiente y puedes seguir trabajando.</p>
     </div>
@@ -343,14 +342,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.27"></script>
-  <script src="js/catalog-lotes.js?v=2.1.27"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.27"></script>
-  <script src="js/catalog-plano.js?v=2.1.27"></script>
-  <script src="js/data.js?v=2.1.27"></script>
-  <script src="js/select.js?v=2.1.27"></script>
-  <script src="js/api.js?v=2.1.27"></script>
-  <script src="js/excel.js?v=2.1.27"></script>
-  <script src="js/app.js?v=2.1.27"></script>
+  <script src="js/config.js?v=2.1.42"></script>
+  <script src="js/catalog-lotes.js?v=2.1.42"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.42"></script>
+  <script src="js/catalog-plano.js?v=2.1.42"></script>
+  <script src="js/data.js?v=2.1.42"></script>
+  <script src="js/select.js?v=2.1.42"></script>
+  <script src="js/api.js?v=2.1.42"></script>
+  <script src="js/excel.js?v=2.1.42"></script>
+  <script src="js/app.js?v=2.1.42"></script>
 </body>
 </html>
