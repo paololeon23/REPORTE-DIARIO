@@ -24,6 +24,9 @@ APP.App = (() => {
     jarrasConv: "",
     jarrasChina: "",
     openLots: [],
+    openQuery: "",
+    openPage: 0,
+    seguir: null,
     saving: false,
     transferring: false,
   };
@@ -322,6 +325,10 @@ APP.App = (() => {
   function avanceParaGuardar() {
     const typed = Number(state.avance) || 0;
     if (state.cierre) return typed > 0 ? String(typed) : "";
+    if (state.seguir) {
+      const delta = Math.round((typed - (Number(state.seguir.morning) || 0)) * 1000) / 1000;
+      return delta > 0 ? String(delta) : "";
+    }
     return state.avance || "";
   }
 
@@ -338,6 +345,10 @@ APP.App = (() => {
   }
 
   function avanceTope() {
+    if (state.seguir) {
+      const area = Number(state.seguir.area) || loteAreaMax();
+      return area > 0 ? area : loteAreaMax();
+    }
     if (state.cierre) {
       const left = Math.round(((Number(state.cierre.area) || 0) - hechoHa()) * 1000) / 1000;
       return left > 0 ? left : 0;
@@ -351,7 +362,17 @@ APP.App = (() => {
   }
 
   function avanceFloor() {
-    return 0;
+    return state.seguir ? Number(state.seguir.base) || 0 : 0;
+  }
+
+  function haFijo(n, raw) {
+    const s = String(raw == null ? "" : raw).trim().replace(",", ".");
+    const num = Number(n);
+    if (/^\d+\.\d{2,}$/.test(s) && Number.isFinite(num) && Math.abs(Number(s) - num) < 0.0001) return s;
+    if (!Number.isFinite(num)) return "0.00";
+    const x = Math.round(num * 1000) / 1000;
+    const fixed = x.toFixed(3);
+    return fixed.endsWith("0") ? x.toFixed(2) : fixed;
   }
 
   function paintAvanceHint() {
@@ -382,6 +403,24 @@ APP.App = (() => {
       if (inp) inp.placeholder = "Solo lo de ahora";
       return;
     }
+    if (state.seguir) {
+      const ph = state.seguir.ph || haFijo(state.seguir.base);
+      const area = Number(state.seguir.area) || loteAreaMax();
+      const typed = Number(state.avance);
+      hint.hidden = false;
+      hint.classList.toggle("is-gap", Number.isFinite(typed) && typed > 0 && typed <= state.seguir.base + 0.0000001);
+      if (lab) lab.textContent = "Avance (ha)";
+      if (inp) inp.placeholder = ph;
+      if (Number.isFinite(typed) && typed > state.seguir.base) {
+        const left = area != null ? Math.round((area - typed) * 1000) / 1000 : null;
+        hint.textContent = left > 0
+          ? `Subes a ${haFijo(typed)} ha. Te quedan ${haFijo(left)} ha.`
+          : `Subes a ${haFijo(typed)} ha. Con esto se completa el área.`;
+      } else {
+        hint.textContent = `Ya van ${ph} ha. Escribe más, hasta ${area != null ? haFijo(area) : "el área"} ha.`;
+      }
+      return;
+    }
     hint.classList.remove("is-gap");
     if (lab) lab.textContent = "Avance (ha)";
     if (inp && document.activeElement !== inp) inp.placeholder = "0";
@@ -404,6 +443,7 @@ APP.App = (() => {
   }
 
   function fillLoteForm(L, rec) {
+    state.seguir = null;
     state.lote = L;
     const floor = isTarde() ? morningAvanceOf(L.lote) : 0;
     const recAv = rec ? Number(rec.avance) : 0;
@@ -462,6 +502,10 @@ APP.App = (() => {
     const max = avanceTope();
     if (max != null && n > max) return { text: String(max), num: max, capped: true };
     const floor = avanceFloor();
+    if (state.seguir && floor > 0 && n <= floor + 0.0000001) {
+      const text = finish && s.endsWith(".") ? s.slice(0, -1) : s;
+      return { text: text, num: n, bajo: true };
+    }
     if (floor > 0 && n < floor) return { text: String(floor), num: floor, floored: true };
     const text = finish && s.endsWith(".") ? s.slice(0, -1) : s;
     return { text: text, num: n };
@@ -477,10 +521,32 @@ APP.App = (() => {
     return next;
   }
 
+  function jarrasTardeGuardadas() {
+    if (!state.seguir || !state.lote) return { conv: 0, china: 0 };
+    const rec = APP.API.recordOf(state.lote.lote, today(), "Tarde", supDni(), canonFundo(state.session.fundo) || state.lote.fundo);
+    if (!rec) return { conv: 0, china: 0 };
+    return { conv: Number(rec.jarrasConv) || 0, china: Number(rec.jarrasChina) || 0 };
+  }
+
+  function jarrasYaDelLote() {
+    if (!state.seguir || !state.lote) return 0;
+    const fundo = String(canonFundo(state.session.fundo) || state.lote.fundo || "").trim().toUpperCase();
+    const lote = String(state.lote.lote);
+    const local = dayRecords().reduce((sum, r) => {
+      if (!r || String(r.lote) !== lote) return sum;
+      const got = String(r.fundo || "").trim().toUpperCase();
+      if (fundo && got && got !== fundo) return sum;
+      return sum + (Number(APP.Data.derive(r).totalJarras) || 0);
+    }, 0);
+    const extra = local > 0 ? 0 : Number(state.seguir.jarrasYa) || 0;
+    return local + extra;
+  }
+
   function currentData() {
     const L = state.lote || {};
-    const jConv = state.conv ? Number(state.jarrasConv) || 0 : 0;
-    const jChina = state.china ? Number(state.jarrasChina) || 0 : 0;
+    const prev = jarrasTardeGuardadas();
+    const jConv = (state.conv ? Number(state.jarrasConv) || 0 : 0) + prev.conv;
+    const jChina = (state.china ? Number(state.jarrasChina) || 0 : 0) + prev.china;
     return {
       fecha: state.cierre && state.cierre.fecha ? state.cierre.fecha : today(),
       cierre: !!(state.cierre && state.cierre.fecha),
@@ -498,7 +564,7 @@ APP.App = (() => {
       grupo: L.grupo || state.session.grupo,
       etapa: L.etapa || state.session.etapa,
       jornales: Number(state.session.jornales) || 0,
-      turnoCampo: state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana",
+      turnoCampo: state.seguir || state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana",
       horaRegistro: "",
       horaEnvio: APP.API.limaDateTime(),
       scanner: APP.Data.fullName(state.session.scannerDni, state.session.scannerNombre),
@@ -561,8 +627,9 @@ APP.App = (() => {
     if (j && j.classList.contains("is-split")) {
       const bits = j.querySelectorAll("b");
       const manana = bits[0] ? Number(bits[0].textContent) || 0 : 0;
+      const ya = Number(j.dataset.ya) || 0;
       if (bits[1]) bits[1].textContent = String(jarras);
-      if (bits[2]) bits[2].textContent = String(manana + jarras);
+      if (bits[2]) bits[2].textContent = String(manana + ya + jarras);
     } else if (j) {
       j.textContent = jarras + " jarras";
     }
@@ -574,15 +641,19 @@ APP.App = (() => {
     const j = $("#lbl-jarras");
     if (j) {
       const lote = state.lote && state.lote.lote;
-      if (isTarde() && lote) {
-        const mananaRec = APP.API.recordOf(lote, today(), "Mañana", supDni(), state.session.fundo);
-        const manana = mananaRec ? Number(APP.Data.derive(mananaRec).totalJarras) || 0 : 0;
+      if ((isTarde() || state.seguir) && lote) {
+        const mananaRec = state.seguir ? null : APP.API.recordOf(lote, today(), "Mañana", supDni(), state.session.fundo);
+        const manana = state.seguir
+          ? jarrasYaDelLote()
+          : (mananaRec ? Number(APP.Data.derive(mananaRec).totalJarras) || 0 : 0);
+        j.dataset.ya = "0";
         j.classList.add("is-split");
         j.innerHTML =
           `<div class="jar-bit"><small>Mañana</small><b>${manana}</b></div>` +
           `<div class="jar-bit"><small>Ahora</small><b>${jarras}</b></div>` +
           `<div class="jar-bit is-total"><small>Total</small><b>${manana + jarras}</b></div>`;
       } else {
+        j.dataset.ya = "0";
         j.classList.remove("is-split");
         j.textContent = jarras + " jarras";
       }
@@ -700,9 +771,15 @@ APP.App = (() => {
                 </div>
               </article>
               <div class="lot-acts">
-                <button type="button" class="lot-act edit" data-edit="${esc(editPart.lote)}" data-tc="${esc(editPart.turnoCampo || "Mañana")}" data-fundo="${esc(editPart.fundo || "")}" aria-label="Editar">
+                ${allUp && falta
+                  ? `<button type="button" class="lot-act plant" data-seguir="${esc(r0.lote)}" data-fundo="${esc(r0.fundo || "")}" aria-label="Seguir cosechando">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22V10"/><path d="M12 10c0-4 3-6 6-6-1 4-3 6-6 6z"/><path d="M12 14c0-3-2.5-5-5.5-5 1 3.2 3.2 5 5.5 5z"/></svg>
+                </button>`
+                  : allUp
+                    ? ""
+                    : `<button type="button" class="lot-act edit" data-edit="${esc(editPart.lote)}" data-tc="${esc(editPart.turnoCampo || "Mañana")}" data-fundo="${esc(editPart.fundo || "")}" aria-label="Editar">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-                </button>
+                </button>`}
                 <button type="button" class="lot-act del" data-del="${esc((delPart || editPart).lote)}" data-tc="${esc((delPart || editPart).turnoCampo || "Mañana")}" data-fundo="${esc((delPart || editPart).fundo || "")}" aria-label="Eliminar"${delPart ? "" : " disabled"}>
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
                 </button>
@@ -715,6 +792,12 @@ APP.App = (() => {
       b.onclick = (e) => {
         e.stopPropagation();
         loadRecord(b.dataset.edit, b.dataset.tc, b.dataset.fundo);
+      };
+    });
+    $("#lot-list").querySelectorAll("[data-seguir]").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        seguirCosecha(b.dataset.seguir, b.dataset.fundo);
       };
     });
     $("#lot-list").querySelectorAll("[data-del]").forEach((b) => {
@@ -732,34 +815,95 @@ APP.App = (() => {
     return Number.isFinite(x) ? String(x) : "—";
   }
 
-  function paintOpenLots() {
-    const box = $("#open-lots");
-    if (!box) return;
-    const list = (state.openLots || []).filter((r) => {
+  function unfinishedLots() {
+    return (state.openLots || []).filter((r) => {
       const av = Number(r.avance) || 0;
       const ar = Number(r.area) || 0;
       return ar > 0 && av + 0.0005 < ar;
     });
+  }
+
+  function openLotHtml(r, i) {
+    const tag = r.fecha ? String(r.fecha).slice(8, 10) + "/" + String(r.fecha).slice(5, 7) : "";
+    const body = `
+      <b>Lote ${esc(r.lote)}</b>
+      <span>avance ${esc(haTxt(r.avance))}</span>
+      <span>área ${esc(haTxt(r.area))}</span>
+      <small>${esc([tag, r.supervisor, r.fundo].filter(Boolean).join(" · "))}</small>`;
+    const plant = `<button type="button" class="lot-act plant open-cosecha" data-cosechar="${i}" aria-label="Cosecha">
+          <small>Cosecha</small>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22V10"/><path d="M12 10c0-4 3-6 6-6-1 4-3 6-6 6z"/><path d="M12 14c0-3-2.5-5-5.5-5 1 3.2 3.2 5 5.5 5z"/></svg>
+        </button>`;
+    return `<div class="open-lot-row"><article class="open-lot">${body}</article>${plant}</div>`;
+  }
+
+  function bindOpenClicks(root, list) {
+    if (!root) return;
+    root.querySelectorAll("[data-cosechar]").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        closeOpenModal();
+        seguirAbierto(list[Number(btn.dataset.cosechar)]);
+      };
+    });
+  }
+
+  function paintOpenLots() {
+    const box = $("#open-lots");
+    const listEl = $("#open-lots-list");
+    const more = $("#btn-open-more");
+    if (!box || !listEl) return;
+    const list = unfinishedLots();
     if (!list.length) {
       box.hidden = true;
-      box.innerHTML = "";
+      listEl.innerHTML = "";
+      if (more) more.hidden = true;
       return;
     }
     box.hidden = false;
-    box.innerHTML = `<p class="open-lots-title">Sin terminar · todos</p>` + list.map((r, i) => {
-      const tag = (r.fecha ? String(r.fecha).slice(8, 10) + "/" + String(r.fecha).slice(5, 7) : "") + " · toca para terminar";
-      const body = `
-        <b>Lote ${esc(r.lote)}</b>
-        <span>avance ${esc(haTxt(r.avance))}</span>
-        <span>área ${esc(haTxt(r.area))}</span>
-        <small>${esc([tag, r.supervisor, r.fundo].filter(Boolean).join(" · "))}</small>`;
-      return r.puede
-        ? `<button type="button" class="open-lot" data-open="${i}">${body}</button>`
-        : `<article class="open-lot">${body}</article>`;
-    }).join("");
-    box.querySelectorAll("[data-open]").forEach((btn) => {
-      btn.onclick = () => startCierre(list[Number(btn.dataset.open)]);
-    });
+    const q = String(state.openQuery || "").trim();
+    const matched = q ? list.filter((r) => String(r.lote || "").includes(q)) : list;
+    const shown = q ? matched : list.slice(0, 3);
+    if (!shown.length) {
+      listEl.innerHTML = `<p class="open-empty">Ningún lote con ese número.</p>`;
+    } else {
+      listEl.innerHTML = shown.map((r) => openLotHtml(r, list.indexOf(r))).join("");
+      bindOpenClicks(listEl, list);
+    }
+    if (more) more.hidden = !!q || list.length <= 3;
+  }
+
+  function paintOpenModal() {
+    const list = unfinishedLots();
+    const size = 5;
+    const pages = Math.max(1, Math.ceil(list.length / size));
+    if (state.openPage >= pages) state.openPage = pages - 1;
+    if (state.openPage < 0) state.openPage = 0;
+    const start = state.openPage * size;
+    const slice = list.slice(start, start + size);
+    const box = $("#open-modal-list");
+    if (box) {
+      box.innerHTML = slice.map((r) => openLotHtml(r, list.indexOf(r))).join("");
+      bindOpenClicks(box, list);
+    }
+    const label = $("#open-page");
+    if (label) label.textContent = state.openPage + 1 + " / " + pages;
+    const prev = $("#open-prev");
+    const next = $("#open-next");
+    if (prev) prev.disabled = state.openPage <= 0;
+    if (next) next.disabled = state.openPage >= pages - 1;
+  }
+
+  function openLotsModal() {
+    state.openPage = 0;
+    const root = $("#qb-open");
+    if (root) root.hidden = false;
+    paintOpenModal();
+  }
+
+  function closeOpenModal() {
+    const root = $("#qb-open");
+    if (root) root.hidden = true;
   }
 
   function refreshOpenLots(force) {
@@ -825,6 +969,119 @@ APP.App = (() => {
     paintStatus();
   }
 
+  function seguirAbierto(item) {
+    if (!item || item.lote == null || item.lote === "") return;
+    const f = canonFundo(item.fundo) || canonFundo(state.session.fundo);
+    const manana = APP.API.recordOf(item.lote, today(), "Mañana", supDni(), f);
+    const tarde = APP.API.recordOf(item.lote, today(), "Tarde", supDni(), f);
+    if (manana || tarde) {
+      seguirCosecha(item.lote, f || item.fundo);
+      return;
+    }
+    const L = APP.Data.findLote(item.lote, f) || {
+      lote: item.lote,
+      fundo: item.fundo,
+      modulo: item.modulo || "",
+      md: item.modulo || "",
+      turno: item.turno || "",
+      variedad: "",
+      etapa: "",
+    };
+    L.area = item.area;
+    const base = Math.round((Number(item.avance) || 0) * 1000) / 1000;
+    const area = Number(item.area) || 0;
+    if (!(area > 0) || base + 0.0005 >= area) return;
+    state.cierre = null;
+    state.seguir = {
+      base: base,
+      morning: base,
+      ph: haFijo(base),
+      area: area,
+      jarrasYa: Number(item.jarras) || 0,
+    };
+    state.session.turnoCampo = "Tarde";
+    if (f) state.session.fundo = f;
+    persistSession();
+    paintPeople({ keepTurno: true });
+    state.lote = L;
+    state.avance = "";
+    state.jarrasConv = "";
+    state.jarrasChina = "";
+    state.conv = false;
+    state.china = false;
+    const av = $("#inp-avance");
+    if (av) {
+      av.value = "";
+      av.placeholder = state.seguir.ph;
+    }
+    const jc = $("#inp-jconv");
+    const jh = $("#inp-jchina");
+    if (jc) jc.value = "";
+    if (jh) jh.value = "";
+    paintLote();
+    paintChecks();
+    paintAvanceHint();
+    scrollToLote();
+    if (av) av.focus();
+  }
+
+  function seguirCosecha(loteId, fundo) {
+    const f = canonFundo(fundo) || canonFundo(state.session.fundo);
+    const manana = APP.API.recordOf(loteId, today(), "Mañana", supDni(), f);
+    const tarde = APP.API.recordOf(loteId, today(), "Tarde", supDni(), f);
+    const rec = manana || tarde;
+    if (!rec) return;
+    const L = APP.Data.findLote(loteId, f) || {
+      lote: rec.lote,
+      md: rec.md,
+      modulo: rec.md ? "M" + rec.md : "",
+      turno: rec.turno,
+      area: rec.area,
+      fundo: rec.fundo,
+      variedad: rec.variedad,
+      etapa: rec.etapa,
+      grupo: rec.grupo,
+      codLote: rec.codLote,
+    };
+    if ((L.area === "" || L.area == null) && rec.area !== "" && rec.area != null) L.area = rec.area;
+    const morning = Math.round((Number(manana && manana.avance) || 0) * 1000) / 1000;
+    const extra = Math.round((Number(tarde && tarde.avance) || 0) * 1000) / 1000;
+    const base = Math.round((morning + extra) * 1000) / 1000;
+    const area = Number(L.area) || 0;
+    if (area > 0 && base + 0.0005 >= area) return;
+    state.cierre = null;
+    state.seguir = {
+      base: base,
+      morning: morning,
+      ph: haFijo(base, !tarde && manana ? manana.avance : ""),
+      area: area,
+    };
+    state.session.turnoCampo = "Tarde";
+    if (f) state.session.fundo = f;
+    persistSession();
+    paintPeople({ keepTurno: true });
+    state.lote = L;
+    state.avance = "";
+    state.jarrasConv = "";
+    state.jarrasChina = "";
+    state.conv = false;
+    state.china = false;
+    const av = $("#inp-avance");
+    if (av) {
+      av.value = "";
+      av.placeholder = state.seguir.ph;
+    }
+    const jc = $("#inp-jconv");
+    const jh = $("#inp-jchina");
+    if (jc) jc.value = "";
+    if (jh) jh.value = "";
+    paintLote();
+    paintChecks();
+    paintAvanceHint();
+    scrollToLote();
+    if (av) av.focus();
+  }
+
   function loadRecord(loteId, turnoCampo, fundo) {
     const tc = turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     state.session.turnoCampo = tc;
@@ -862,6 +1119,7 @@ APP.App = (() => {
 
   function resetLoteInputs() {
     state.lote = null;
+    state.seguir = null;
     state.avance = "";
     state.conv = false;
     state.china = false;
@@ -916,6 +1174,10 @@ APP.App = (() => {
       }
       const av = applyAvance(state.avance, true);
       const maxHa = avanceTope();
+      if (state.seguir && (av.bajo || av.num <= state.seguir.base + 0.0000001)) {
+        await feedback("Avance mínimo", `Tiene que ser más de ${state.seguir.ph} ha. El máximo es ${haFijo(state.seguir.area)} ha.`);
+        return;
+      }
       if (!(av.num > 0)) {
         await feedback("Avance inválido", "Escribe solo lo que avanzas ahora.");
         return;
@@ -1220,6 +1482,26 @@ APP.App = (() => {
     ensureExportSheet();
     click("#btn-save", saveLote);
     click("#btn-export", openExport);
+    on("#inp-open-q", "input", () => {
+      const el = $("#inp-open-q");
+      const text = String(el?.value || "").replace(/\D/g, "");
+      state.openQuery = text;
+      if (el && el.value !== text) el.value = text;
+      paintOpenLots();
+    });
+    click("#btn-open-more", openLotsModal);
+    click("#btn-open-close", closeOpenModal);
+    on("#qb-open", "click", (e) => {
+      if (e.target === $("#qb-open")) closeOpenModal();
+    });
+    click("#open-prev", () => {
+      state.openPage -= 1;
+      paintOpenModal();
+    });
+    click("#open-next", () => {
+      state.openPage += 1;
+      paintOpenModal();
+    });
     click("#btn-historial", openHistorial);
     click("#btn-hist-back", closeHistorial);
     click("#btn-sync", openSync);
@@ -1636,9 +1918,6 @@ APP.App = (() => {
         return;
       }
       const turnoEnvio = isSecond ? "Tarde" : "Mañana";
-      state.session.turnoCampo = turnoEnvio;
-      persistSession();
-      paintPeople();
       if (isSecond) APP.API.queueTodayForResend(dni);
       const queue = APP.API.pendingRecords(dni).filter((r) => String(r.fecha) === today());
       if (!queue.length) {
@@ -1659,6 +1938,12 @@ APP.App = (() => {
               "Enviar"
             );
         if (!ok) return;
+      }
+
+      if (!isSecond) {
+        state.session.turnoCampo = "Tarde";
+        persistSession();
+        paintPeople({ keepTurno: true });
       }
 
       APP.API.queueReport({

@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.46" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.46" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.56" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.56" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -226,7 +226,14 @@
           <button type="button" class="hoy-btn dark" id="btn-sync">Sync</button>
         </div>
         <div class="day-kpis" id="day-kpis"></div>
-        <div class="open-lots" id="open-lots" hidden></div>
+        <div class="open-lots" id="open-lots" hidden>
+          <p class="open-lots-title">Sin terminar</p>
+          <label class="open-search">
+            <input id="inp-open-q" inputmode="numeric" placeholder="Buscar lote" aria-label="Buscar lote" />
+          </label>
+          <div id="open-lots-list"></div>
+          <button type="button" class="open-more" id="btn-open-more" hidden>Ver más</button>
+        </div>
         <div class="lot-list" id="lot-list"></div>
         <button type="button" class="btn-ghost" id="btn-export">Ver resumen</button>
       </section>
@@ -276,6 +283,20 @@
     <div class="qb-loader-card"><span class="qb-spinner"></span><p id="qb-loader-text">Guardando…</p></div>
   </div>
   <div class="qb-toast" id="qb-toast" hidden role="status"></div>
+  <div class="qb-open" id="qb-open" hidden>
+    <div class="qb-open-sheet" role="dialog" aria-modal="true" aria-labelledby="open-title">
+      <header class="qb-open-head">
+        <h2 id="open-title">Sin terminar</h2>
+        <button type="button" class="qb-open-close" id="btn-open-close" aria-label="Cerrar">×</button>
+      </header>
+      <div class="open-modal-list" id="open-modal-list"></div>
+      <div class="open-pager">
+        <button type="button" id="open-prev">Anterior</button>
+        <span id="open-page">1 / 1</span>
+        <button type="button" id="open-next">Siguiente</button>
+      </div>
+    </div>
+  </div>
   <div class="qb-fb" id="qb-fb" hidden>
     <div class="qb-fb-sheet">
       <strong id="qb-fb-title"></strong>
@@ -342,14 +363,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.46"></script>
-  <script src="js/catalog-lotes.js?v=2.1.46"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.46"></script>
-  <script src="js/catalog-plano.js?v=2.1.46"></script>
-  <script src="js/data.js?v=2.1.46"></script>
-  <script src="js/select.js?v=2.1.46"></script>
-  <script src="js/api.js?v=2.1.46"></script>
-  <script src="js/excel.js?v=2.1.46"></script>
-  <script src="js/app.js?v=2.1.46"></script>
+  <script src="js/config.js?v=2.1.56"></script>
+  <script src="js/catalog-lotes.js?v=2.1.56"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.56"></script>
+  <script src="js/catalog-plano.js?v=2.1.56"></script>
+  <script src="js/data.js?v=2.1.56"></script>
+  <script src="js/select.js?v=2.1.56"></script>
+  <script src="js/api.js?v=2.1.56"></script>
+  <script src="js/excel.js?v=2.1.56"></script>
+  <script src="js/app.js?v=2.1.56"></script>
 </body>
 </html>

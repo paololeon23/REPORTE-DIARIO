@@ -2172,6 +2172,7 @@ function openLotsToday_() {
   var cTurno = headerCol_(have, ['Turno']);
   var cAv = headerCol_(have, ['Avance']);
   var cAr = headerCol_(have, ['Área', 'Area']);
+  var cJarras = headerCol_(have, ['Total Jarras', 'Jarras']);
   if (cFecha < 0 || cLote < 0 || cAv < 0 || cAr < 0) return { ok: true, fecha: iso, items: [] };
   var n = sh.getLastRow() - 1;
   var data = sh.getRange(2, 1, n, width).getValues();
@@ -2192,6 +2193,7 @@ function openLotsToday_() {
         turno: cTurno >= 0 ? String(row[cTurno] || '').replace(/^T/i, '').trim() : '',
         area: 0,
         avance: 0,
+        jarras: 0,
         nombres: [],
         partes: []
       };
@@ -2203,6 +2205,7 @@ function openLotsToday_() {
     var nombre = cSup >= 0 ? String(row[cSup] || '').trim() : '';
     g.avance += avance;
     g.area = Math.max(g.area, num(row[cAr]));
+    if (cJarras >= 0) g.jarras += num(row[cJarras]);
     if (nombre && g.nombres.indexOf(nombre) < 0) g.nombres.push(nombre);
     g.partes.push({ dni: dni, avance: Math.round(avance * 1000) / 1000 });
   });
@@ -2215,6 +2218,7 @@ function openLotsToday_() {
       lote: g.lote,
       avance: Math.round(g.avance * 1000) / 1000,
       area: Math.round(g.area * 1000) / 1000,
+      jarras: Math.round(g.jarras),
       supervisor: g.nombres.join(', '),
       turno: g.turno,
       fundo: g.fundo,
