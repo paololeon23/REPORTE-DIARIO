@@ -2207,6 +2207,7 @@ function openLotsToday_() {
     g.area = Math.max(g.area, num(row[cAr]));
     if (cJarras >= 0) g.jarras += num(row[cJarras]);
     if (nombre && g.nombres.indexOf(nombre) < 0) g.nombres.push(nombre);
+    if (f === iso) g.hoy = true;
     g.partes.push({ dni: dni, avance: Math.round(avance * 1000) / 1000 });
   });
   var items = [];

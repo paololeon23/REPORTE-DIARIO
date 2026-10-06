@@ -391,11 +391,15 @@ APP.API = (() => {
     const nombre = APP.Data
       ? APP.Data.fullName(dni, rec.supervisor || session.supervisorNombre)
       : rec.supervisor || session.supervisorNombre || "";
-    return catalogPatch({
+    const data = catalogPatch({
       ...rec,
       supervisorDni: dni || rec.supervisorDni,
       supervisor: nombre || rec.supervisor,
     });
+    delete data.previoNombre;
+    delete data.previoAvance;
+    delete data.previoTotal;
+    return data;
   }
 
   async function submit(payload) {

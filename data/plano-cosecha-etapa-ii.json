@@ -180,26 +180,12 @@
     { "tunel": "T10", "turno": 10, "lote": 419, "ha": 1.36, "modulo": 9, "variedad": "Magica", "codLote": "M9T10LT419" },
     { "tunel": "T10", "turno": 10, "lote": 420, "ha": 0.72, "modulo": 9, "variedad": "Magica", "codLote": "M9T10LT420" },
     { "tunel": "T5", "turno": 5, "lote": 198, "ha": 1.96, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T5LT198" },
-    { "tunel": "T5", "turno": 5, "lote": 199, "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T5LT199" },
-    { "tunel": "T5", "turno": 5, "lote": 200, "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T5LT200" },
-    { "tunel": "T5", "turno": 5, "lote": 201, "ha": 1.8, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T5LT201" },
-    { "tunel": "T7", "turno": 7, "lote": 202, "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T7LT202" },
-    { "tunel": "T6", "turno": 6, "lote": 203, "ha": 0.98, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T6LT203" },
-    { "tunel": "T6", "turno": 6, "lote": 204, "ha": 0.84, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T6LT204" },
-    { "tunel": "T6", "turno": 6, "lote": 205, "ha": 0.98, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T6LT205" },
-    { "tunel": "T7", "turno": 7, "lote": 206, "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T7LT206" },
-    { "tunel": "T7", "turno": 7, "lote": 207, "ha": 1.94, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T7LT207" },
-    { "tunel": "T11", "turno": 11, "lote": 209, "ha": 1.94, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT209" },
     { "tunel": "T11", "turno": 11, "lote": 210, "ha": 0.7, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT210" },
-    { "tunel": "T11", "turno": 11, "lote": 211, "ha": 2.0, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT211" },
-    { "tunel": "T11", "turno": 11, "lote": 212, "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT212" },
     { "tunel": "T8", "turno": 8, "lote": 213, "ha": 2.13, "modulo": 10, "variedad": "Magica", "codLote": "M10T8LT213" },
     { "tunel": "T8", "turno": 8, "lote": 214, "ha": 2.48, "modulo": 10, "variedad": "Magica", "codLote": "M10T8LT214" },
     { "tunel": "T8", "turno": 8, "lote": 215, "ha": 2.23, "modulo": 10, "variedad": "Magica", "codLote": "M10T8LT215" },
     { "tunel": "T8", "turno": 8, "lote": 216, "ha": 2.16, "modulo": 10, "variedad": "Magica", "codLote": "M10T8LT216" },
     { "tunel": "T10", "turno": 10, "lote": 223, "ha": 1.12, "modulo": 10, "variedad": "Magica", "codLote": "M10T10LT223" },
-    { "tunel": "T10", "turno": 10, "lote": 224, "ha": 1.16, "modulo": 10, "variedad": "Magica", "codLote": "M10T10LT224" },
-    { "tunel": "T11", "turno": 11, "lote": "208 A", "ha": 0.46, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT208 A" },
-    { "tunel": "T11", "turno": 11, "lote": "208 B", "ha": 1.9, "modulo": 10, "variedad": "Sekoya Pop", "codLote": "M10T11LT208 B" }
+    { "tunel": "T10", "turno": 10, "lote": 224, "ha": 1.16, "modulo": 10, "variedad": "Magica", "codLote": "M10T10LT224" }
   ]
 }

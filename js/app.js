@@ -283,6 +283,7 @@ APP.App = (() => {
       btn.setAttribute("aria-selected", on ? "true" : "false");
     });
     const envios = APP.API.sendCount(state.session.supervisorDni);
+    ensureTurnoDelDia();
     if (!opts || !opts.keepTurno) syncTurnoCampo();
     const turno = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     const lbl = $("#lbl-turno-campo");
@@ -303,7 +304,22 @@ APP.App = (() => {
     if (sub) sub.textContent = turno === "Tarde" ? "Sigue los lotes de la mañana o agrega uno nuevo." : "Lote, avance y jarras del día.";
   }
 
+  function ensureTurnoDelDia() {
+    const day = today();
+    if (!state.session.turnoFecha) {
+      state.session.turnoFecha = day;
+      persistSession();
+      return;
+    }
+    if (state.session.turnoFecha !== day) {
+      state.session.turnoFecha = day;
+      state.session.turnoCampo = "Mañana";
+      persistSession();
+    }
+  }
+
   function syncTurnoCampo() {
+    ensureTurnoDelDia();
     const turno = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
     if (state.session.turnoCampo !== turno) {
       state.session.turnoCampo = turno;
@@ -326,8 +342,18 @@ APP.App = (() => {
     const typed = Number(state.avance) || 0;
     if (state.cierre) return typed > 0 ? String(typed) : "";
     if (state.seguir) {
-      const delta = Math.round((typed - (Number(state.seguir.morning) || 0)) * 1000) / 1000;
-      return delta > 0 ? String(delta) : "";
+      if (state.session.turnoCampo !== "Tarde") {
+        const fundo = canonFundo(state.session.fundo) || (state.lote && state.lote.fundo);
+        const morningRec = state.lote
+          ? APP.API.recordOf(state.lote.lote, today(), "Mañana", supDni(), fundo)
+          : null;
+        const prev = Number(morningRec && morningRec.avance) || 0;
+        const total = Math.round((prev + typed) * 1000) / 1000;
+        return total > 0 ? String(total) : "";
+      }
+      const ya = Math.max(0, Math.round(((Number(state.seguir.base) || 0) - (Number(state.seguir.morning) || 0)) * 1000) / 1000);
+      const add = Math.round((ya + typed) * 1000) / 1000;
+      return add > 0 ? String(add) : "";
     }
     return state.avance || "";
   }
@@ -346,8 +372,9 @@ APP.App = (() => {
 
   function avanceTope() {
     if (state.seguir) {
-      const area = Number(state.seguir.area) || loteAreaMax();
-      return area > 0 ? area : loteAreaMax();
+      const area = Number(state.seguir.area) || loteAreaMax() || 0;
+      const left = Math.round((area - (Number(state.seguir.base) || 0)) * 1000) / 1000;
+      return left > 0 ? left : 0;
     }
     if (state.cierre) {
       const left = Math.round(((Number(state.cierre.area) || 0) - hechoHa()) * 1000) / 1000;
@@ -362,7 +389,7 @@ APP.App = (() => {
   }
 
   function avanceFloor() {
-    return state.seguir ? Number(state.seguir.base) || 0 : 0;
+    return 0;
   }
 
   function haFijo(n, raw) {
@@ -375,12 +402,54 @@ APP.App = (() => {
     return fixed.endsWith("0") ? x.toFixed(2) : fixed;
   }
 
+  function hideAvanceSplit() {
+    const board = $("#avance-board");
+    if (board) board.classList.remove("is-split");
+    const prevCol = $("#avance-prev-col");
+    const sumCol = $("#avance-sum-col");
+    if (prevCol) prevCol.hidden = true;
+    if (sumCol) sumCol.hidden = true;
+  }
+
+  function showAvanceSplit(prev, now, area) {
+    const board = $("#avance-board");
+    const prevCol = $("#avance-prev-col");
+    const sumCol = $("#avance-sum-col");
+    const prevEl = $("#avance-prev");
+    const totalEl = $("#avance-total");
+    const total = Math.round(((Number(prev) || 0) + (Number(now) || 0)) * 1000) / 1000;
+    if (board) board.classList.add("is-split");
+    if (prevCol) prevCol.hidden = false;
+    if (sumCol) sumCol.hidden = false;
+    if (prevEl) prevEl.textContent = haFijo(prev);
+    if (totalEl) totalEl.textContent = haFijo(total);
+    const lab = $("#lbl-avance");
+    if (lab) lab.textContent = "Ahora";
+    const inp = $("#inp-avance");
+    if (inp) inp.placeholder = "0";
+    const hint = $("#avance-min");
+    if (!hint) return;
+    const left = area != null ? Math.round((Number(area) - total) * 1000) / 1000 : null;
+    hint.classList.remove("is-gap");
+    if (left > 0) {
+      hint.hidden = false;
+      hint.textContent = `Te quedan ${haFijo(left)} ha.`;
+    } else if (Number(now) > 0) {
+      hint.hidden = false;
+      hint.textContent = "Con esto se completa el área.";
+    } else {
+      hint.hidden = true;
+      hint.textContent = "";
+    }
+  }
+
   function paintAvanceHint() {
     const hint = $("#avance-min");
     if (!hint) return;
     const lab = $("#lbl-avance");
     const inp = $("#inp-avance");
     if (state.cierre) {
+      hideAvanceSplit();
       const hecho = hechoHa();
       const left = faltaHa();
       hint.hidden = false;
@@ -404,21 +473,8 @@ APP.App = (() => {
       return;
     }
     if (state.seguir) {
-      const ph = state.seguir.ph || haFijo(state.seguir.base);
       const area = Number(state.seguir.area) || loteAreaMax();
-      const typed = Number(state.avance);
-      hint.hidden = false;
-      hint.classList.toggle("is-gap", Number.isFinite(typed) && typed > 0 && typed <= state.seguir.base + 0.0000001);
-      if (lab) lab.textContent = "Avance (ha)";
-      if (inp) inp.placeholder = ph;
-      if (Number.isFinite(typed) && typed > state.seguir.base) {
-        const left = area != null ? Math.round((area - typed) * 1000) / 1000 : null;
-        hint.textContent = left > 0
-          ? `Subes a ${haFijo(typed)} ha. Te quedan ${haFijo(left)} ha.`
-          : `Subes a ${haFijo(typed)} ha. Con esto se completa el área.`;
-      } else {
-        hint.textContent = `Ya van ${ph} ha. Escribe más, hasta ${area != null ? haFijo(area) : "el área"} ha.`;
-      }
+      showAvanceSplit(state.seguir.base, Number(state.avance) || 0, area);
       return;
     }
     hint.classList.remove("is-gap");
@@ -426,10 +482,10 @@ APP.App = (() => {
     if (inp && document.activeElement !== inp) inp.placeholder = "0";
     const morning = isTarde() && state.lote ? morningAvanceOf(state.lote.lote) : 0;
     if (morning > 0) {
-      hint.hidden = false;
-      hint.textContent = `Avance de la mañana: ${morning} ha. Aquí solo lo de la tarde.`;
+      showAvanceSplit(morning, Number(state.avance) || 0, loteAreaMax());
       return;
     }
+    hideAvanceSplit();
     const max = loteAreaMax();
     const av = Number(state.avance);
     if (!isTarde() && max != null && Number.isFinite(av) && av > 0 && av < max) {
@@ -502,10 +558,6 @@ APP.App = (() => {
     const max = avanceTope();
     if (max != null && n > max) return { text: String(max), num: max, capped: true };
     const floor = avanceFloor();
-    if (state.seguir && floor > 0 && n <= floor + 0.0000001) {
-      const text = finish && s.endsWith(".") ? s.slice(0, -1) : s;
-      return { text: text, num: n, bajo: true };
-    }
     if (floor > 0 && n < floor) return { text: String(floor), num: floor, floored: true };
     const text = finish && s.endsWith(".") ? s.slice(0, -1) : s;
     return { text: text, num: n };
@@ -523,7 +575,8 @@ APP.App = (() => {
 
   function jarrasTardeGuardadas() {
     if (!state.seguir || !state.lote) return { conv: 0, china: 0 };
-    const rec = APP.API.recordOf(state.lote.lote, today(), "Tarde", supDni(), canonFundo(state.session.fundo) || state.lote.fundo);
+    const tc = state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana";
+    const rec = APP.API.recordOf(state.lote.lote, today(), tc, supDni(), canonFundo(state.session.fundo) || state.lote.fundo);
     if (!rec) return { conv: 0, china: 0 };
     return { conv: Number(rec.jarrasConv) || 0, china: Number(rec.jarrasChina) || 0 };
   }
@@ -544,6 +597,8 @@ APP.App = (() => {
 
   function currentData() {
     const L = state.lote || {};
+    const fundoNow = canonFundo(state.session.fundo) || L.fundo || "";
+    const ajeno = L.lote ? ultimoCosechador(L.lote, fundoNow) : null;
     const prev = jarrasTardeGuardadas();
     const jConv = (state.conv ? Number(state.jarrasConv) || 0 : 0) + prev.conv;
     const jChina = (state.china ? Number(state.jarrasChina) || 0 : 0) + prev.china;
@@ -551,7 +606,7 @@ APP.App = (() => {
       fecha: state.cierre && state.cierre.fecha ? state.cierre.fecha : today(),
       cierre: !!(state.cierre && state.cierre.fecha),
       lote: L.lote || "",
-      fundo: canonFundo(state.session.fundo) || L.fundo || "",
+      fundo: fundoNow,
       variedad: L.variedad || "",
       md: L.md || "",
       turno: L.turno || "",
@@ -564,7 +619,7 @@ APP.App = (() => {
       grupo: L.grupo || state.session.grupo,
       etapa: L.etapa || state.session.etapa,
       jornales: Number(state.session.jornales) || 0,
-      turnoCampo: state.seguir || state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana",
+      turnoCampo: state.session.turnoCampo === "Tarde" ? "Tarde" : "Mañana",
       horaRegistro: "",
       horaEnvio: APP.API.limaDateTime(),
       scanner: APP.Data.fullName(state.session.scannerDni, state.session.scannerNombre),
@@ -572,6 +627,9 @@ APP.App = (() => {
       supervisor: APP.Data.fullName(state.session.supervisorDni, state.session.supervisorNombre) || state.session.supervisorNombre || "",
       supervisorDni: state.session.supervisorDni,
       pesoJarra: pesoNum(),
+      previoNombre: ajeno ? ajeno.name : "",
+      previoAvance: ajeno ? ajeno.avance : 0,
+      previoTotal: ajeno ? ajeno.total : 0,
     };
   }
 
@@ -696,7 +754,7 @@ APP.App = (() => {
     const mananaJ = tarde ? jarrasDe(dayRecords(today(), "Mañana")) : 0;
     const tardeJ = tarde ? jarrasDe(dayRecords(today(), "Tarde")) : 0;
     const jarrasKpi = tarde
-      ? `<div class="kpi-split"><small>Jarras</small><b><i>Mañana ${mananaJ}</i><i>Ahora ${tardeJ}</i><i>Total ${mananaJ + tardeJ}</i></b></div>`
+      ? `<div class="kpi-jarras"><small>Jarras</small><div class="kpi-jarras-grid"><span><small>Mañana</small><b>${mananaJ}</b></span><span><small>Ahora</small><b>${tardeJ}</b></span><span class="is-total"><small>Total</small><b>${mananaJ + tardeJ}</b></span></div></div>`
       : `<div><small>Jarras</small><strong>${t.totalJarras}</strong></div>`;
     $("#day-kpis").innerHTML = `
       <div><small>Lotes</small><strong>${model.filledCount}</strong></div>
@@ -732,6 +790,7 @@ APP.App = (() => {
             });
             avanceN = Math.round(avanceN * 1000) / 1000;
             kg = APP.Data.round2(kg);
+            const previo = ultimoCosechador(r0.lote, r0.fundo);
             const ordered = parts.slice().sort((a, b) => {
               const ta = (a.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
               const tb = (b.turnoCampo || "Mañana") === "Tarde" ? 1 : 0;
@@ -742,7 +801,13 @@ APP.App = (() => {
               .filter((n) => n > 0);
             const sumaTxt = bits.length > 1 ? bits.join(" + ") : "";
             const areaN = Number(area);
-            const falta = Number.isFinite(areaN) && areaN > 0 && avanceN + 0.0005 < areaN;
+            const cerrado = loteYaCerrado(r0.lote, r0.fundo, areaN, avanceN)
+              || (allUp && servidorYaLoCerro(r0.lote, r0.fundo));
+            const falta = !cerrado && Number.isFinite(areaN) && areaN > 0 && avanceN + 0.0005 < areaN;
+            if (previo) APP.API.notePrevio(r0.lote, r0.fundo, supDni(), previo);
+            const previoHtml = previo
+              ? `<div class="lot-last"><em>Último cosechador</em><span>${esc(previo.name)}</span><b>${esc(haFijo(previo.avance))}</b></div>`
+              : "";
             const tcNow = isTarde() ? "Tarde" : "Mañana";
             const editPart = parts.find((r) => (r.turnoCampo || "Mañana") === tcNow)
               || parts.find((r) => !APP.API.isUploaded(r))
@@ -769,6 +834,7 @@ APP.App = (() => {
                     <b class="av-line"><span>${esc(avanceN)}</span>${sumaTxt ? `<span class="av-sum">${esc(sumaTxt)}</span>` : ""}</b>
                   </div>
                 </div>
+                ${previoHtml}
               </article>
               <div class="lot-acts">
                 ${allUp && falta
@@ -815,25 +881,140 @@ APP.App = (() => {
     return Number.isFinite(x) ? String(x) : "—";
   }
 
+  function previoKey(lote, fundo) {
+    return String(lote || "") + "|" + String(fundo || "").trim().toUpperCase();
+  }
+
+  function loadPrevioMap() {
+    try {
+      const raw = JSON.parse(localStorage.getItem("app_cosecha_previo") || "null");
+      if (!raw || raw.fecha !== today() || !raw.by) return {};
+      return raw.by;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function rememberPrevio(lote, fundo, info) {
+    if (!info || !info.name || !(Number(info.avance) > 0)) return;
+    const by = loadPrevioMap();
+    const key = previoKey(lote, fundo);
+    const total = Number(info.total) > 0 ? Number(info.total) : Number(info.avance);
+    const prev = by[key];
+    if (prev && prev.name === info.name && Number(prev.avance) === Number(info.avance) && Number(prev.total) === total) return;
+    by[key] = { name: info.name, avance: Number(info.avance), total: total };
+    try {
+      localStorage.setItem("app_cosecha_previo", JSON.stringify({ fecha: today(), by: by }));
+    } catch (_) {}
+  }
+
+  function previoFromItem(item) {
+    if (!item) return null;
+    const mine = supDni();
+    const partes = Array.isArray(item.partes) ? item.partes : [];
+    const other = partes.filter((p) => p && String(p.dni || "") !== mine && (Number(p.avance) || 0) > 0);
+    if (other.length) {
+      const last = other[other.length - 1];
+      const total = Math.round(other.reduce((sum, p) => sum + (Number(p.avance) || 0), 0) * 1000) / 1000;
+      const name = APP.Data.fullName(last.dni, "") || String(item.supervisor || "").split(",").pop().trim();
+      const avance = Math.round((Number(last.avance) || 0) * 1000) / 1000;
+      if (!name || !(avance > 0)) return null;
+      return { name: name, avance: avance, total: total };
+    }
+    const myName = String(state.session.supervisorNombre || "").trim().toUpperCase();
+    const names = String(item.supervisor || "").split(",").map((s) => s.trim()).filter((n) => n && n.toUpperCase() !== myName);
+    const name = names.length ? names[names.length - 1] : "";
+    const avance = Math.round((Number(item.avance) || 0) * 1000) / 1000;
+    if (!name || !(avance > 0)) return null;
+    return { name: name, avance: avance, total: avance };
+  }
+
+  function openLotItem(lote, fundo) {
+    const wantL = String(lote || "");
+    const wantF = String(fundo || "").trim().toUpperCase();
+    return (state.openLots || []).find((r) => {
+      if (!r || String(r.lote) !== wantL) return false;
+      const f = String(r.fundo || "").trim().toUpperCase();
+      return !wantF || !f || f === wantF;
+    }) || null;
+  }
+
+  function ultimoCosechador(lote, fundo) {
+    const item = openLotItem(lote, fundo);
+    if (item) {
+      const info = previoFromItem(item);
+      if (info) rememberPrevio(lote, fundo, info);
+      return info;
+    }
+    const cached = loadPrevioMap()[previoKey(lote, fundo)];
+    if (cached && cached.name && Number(cached.avance) > 0) {
+      return {
+        name: cached.name,
+        avance: Number(cached.avance) || 0,
+        total: Number(cached.total) > 0 ? Number(cached.total) : Number(cached.avance) || 0,
+      };
+    }
+    const wantF = String(fundo || "").trim().toUpperCase();
+    const rec = dayRecords().find((r) => {
+      if (!r || String(r.lote) !== String(lote) || !r.previoNombre) return false;
+      const got = String(r.fundo || "").trim().toUpperCase();
+      return !wantF || !got || got === wantF;
+    });
+    if (!rec) return null;
+    const avance = Number(rec.previoAvance) || 0;
+    if (!(avance > 0)) return null;
+    return { name: rec.previoNombre, avance: avance, total: Number(rec.previoTotal) > 0 ? Number(rec.previoTotal) : avance };
+  }
+
+  function avanceMio(lote, fundo) {
+    const wantF = String(fundo || "").trim().toUpperCase();
+    return dayRecords().reduce((sum, r) => {
+      if (!r || String(r.lote) !== String(lote)) return sum;
+      const got = String(r.fundo || "").trim().toUpperCase();
+      if (wantF && got && got !== wantF) return sum;
+      return sum + (Number(r.avance) || 0);
+    }, 0);
+  }
+
+  function loteYaCerrado(lote, fundo, area, mio) {
+    const prev = ultimoCosechador(lote, fundo);
+    const hecho = (Number(mio) || 0) + (prev ? Number(prev.total) || 0 : 0);
+    const ar = Number(area) || 0;
+    return ar > 0 && hecho + 0.0005 >= ar;
+  }
+
+  function servidorYaLoCerro(lote, fundo) {
+    if (!state.openLotsLoaded) return false;
+    const item = openLotItem(lote, fundo);
+    if (!item) return true;
+    const av = Number(item.avance) || 0;
+    const ar = Number(item.area) || 0;
+    return ar > 0 && av + 0.0005 >= ar;
+  }
+
   function unfinishedLots() {
     return (state.openLots || []).filter((r) => {
       const av = Number(r.avance) || 0;
       const ar = Number(r.area) || 0;
-      return ar > 0 && av + 0.0005 < ar;
+      if (!(ar > 0) || !(av + 0.0005 < ar)) return false;
+      const mio = avanceMio(r.lote, r.fundo);
+      if (mio > 0 && loteYaCerrado(r.lote, r.fundo, ar, mio)) return false;
+      return true;
     });
   }
 
   function openLotHtml(r, i) {
-    const tag = r.fecha ? String(r.fecha).slice(8, 10) + "/" + String(r.fecha).slice(5, 7) : "";
     const body = `
       <b>Lote ${esc(r.lote)}</b>
       <span>avance ${esc(haTxt(r.avance))}</span>
       <span>área ${esc(haTxt(r.area))}</span>
-      <small>${esc([tag, r.supervisor, r.fundo].filter(Boolean).join(" · "))}</small>`;
-    const plant = `<button type="button" class="lot-act plant open-cosecha" data-cosechar="${i}" aria-label="Cosecha">
-          <small>Cosecha</small>
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22V10"/><path d="M12 10c0-4 3-6 6-6-1 4-3 6-6 6z"/><path d="M12 14c0-3-2.5-5-5.5-5 1 3.2 3.2 5 5.5 5z"/></svg>
-        </button>`;
+      <small>${esc([r.supervisor, r.fundo].filter(Boolean).join(" · "))}</small>`;
+    const plant = `<div class="open-cosecha">
+          <span class="open-cosecha-label">Cosechar</span>
+          <button type="button" class="lot-act plant" data-cosechar="${i}" aria-label="Cosechar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22V10"/><path d="M12 10c0-4 3-6 6-6-1 4-3 6-6 6z"/><path d="M12 14c0-3-2.5-5-5.5-5 1 3.2 3.2 5 5.5 5z"/></svg>
+          </button>
+        </div>`;
     return `<div class="open-lot-row"><article class="open-lot">${body}</article>${plant}</div>`;
   }
 
@@ -971,7 +1152,10 @@ APP.App = (() => {
 
   function seguirAbierto(item) {
     if (!item || item.lote == null || item.lote === "") return;
+    const visto = previoFromItem(item);
+    if (visto) rememberPrevio(item.lote, item.fundo, visto);
     const f = canonFundo(item.fundo) || canonFundo(state.session.fundo);
+    if (loteYaCerrado(item.lote, f || item.fundo, item.area, avanceMio(item.lote, f || item.fundo))) return;
     const manana = APP.API.recordOf(item.lote, today(), "Mañana", supDni(), f);
     const tarde = APP.API.recordOf(item.lote, today(), "Tarde", supDni(), f);
     if (manana || tarde) {
@@ -999,7 +1183,6 @@ APP.App = (() => {
       area: area,
       jarrasYa: Number(item.jarras) || 0,
     };
-    state.session.turnoCampo = "Tarde";
     if (f) state.session.fundo = f;
     persistSession();
     paintPeople({ keepTurno: true });
@@ -1012,7 +1195,7 @@ APP.App = (() => {
     const av = $("#inp-avance");
     if (av) {
       av.value = "";
-      av.placeholder = state.seguir.ph;
+      av.placeholder = "0";
     }
     const jc = $("#inp-jconv");
     const jh = $("#inp-jchina");
@@ -1049,6 +1232,7 @@ APP.App = (() => {
     const base = Math.round((morning + extra) * 1000) / 1000;
     const area = Number(L.area) || 0;
     if (area > 0 && base + 0.0005 >= area) return;
+    if (loteYaCerrado(loteId, f, area, base)) return;
     state.cierre = null;
     state.seguir = {
       base: base,
@@ -1056,7 +1240,6 @@ APP.App = (() => {
       ph: haFijo(base, !tarde && manana ? manana.avance : ""),
       area: area,
     };
-    state.session.turnoCampo = "Tarde";
     if (f) state.session.fundo = f;
     persistSession();
     paintPeople({ keepTurno: true });
@@ -1069,7 +1252,7 @@ APP.App = (() => {
     const av = $("#inp-avance");
     if (av) {
       av.value = "";
-      av.placeholder = state.seguir.ph;
+      av.placeholder = "0";
     }
     const jc = $("#inp-jconv");
     const jh = $("#inp-jchina");
@@ -1174,10 +1357,6 @@ APP.App = (() => {
       }
       const av = applyAvance(state.avance, true);
       const maxHa = avanceTope();
-      if (state.seguir && (av.bajo || av.num <= state.seguir.base + 0.0000001)) {
-        await feedback("Avance mínimo", `Tiene que ser más de ${state.seguir.ph} ha. El máximo es ${haFijo(state.seguir.area)} ha.`);
-        return;
-      }
       if (!(av.num > 0)) {
         await feedback("Avance inválido", "Escribe solo lo que avanzas ahora.");
         return;
@@ -1276,6 +1455,10 @@ APP.App = (() => {
           state.session.jornales = 0;
           state.session.grupo = "";
           state.session.etapa = "";
+          state.session.fundo = "";
+          state.session.pesoJarra = "";
+          state.session.turnoCampo = "Mañana";
+          state.session.turnoFecha = today();
           resetLoteInputs();
           persistSession();
           paintPeople();

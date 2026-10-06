@@ -279,11 +279,24 @@ APP.Data = (() => {
     const hasOwn = kind === "III" || kind === "IV"
       ? lotes.some((l) => etapaKind(l.etapa) === kind)
       : !!kind;
+    const owned = {};
+    if ((kind === "III" || kind === "IV") && hasOwn) {
+      lotes.forEach((l) => {
+        if (etapaKind(l.etapa) === kind) owned[compactLoteId(l.lote)] = true;
+      });
+    }
     const out = [];
     const limit = s ? 40 : 32;
     for (let i = 0; i < lotes.length; i++) {
       const l = lotes[i];
-      if (hasOwn && etapaKind(l.etapa) !== kind) continue;
+      const ek = etapaKind(l.etapa);
+      if (kind === "I" || kind === "II") {
+        if (ek !== kind) continue;
+      } else if ((kind === "III" || kind === "IV") && hasOwn) {
+        const same = ek === kind;
+        const general = (ek === "I" || ek === "II") && !owned[compactLoteId(l.lote)];
+        if (!same && !general) continue;
+      } else if (hasOwn && ek !== kind) continue;
       const loteStr = String(l.lote).toLowerCase();
       if (s) {
         const hay = `${l.lote} ${l.md} ${l.modulo} ${l.turno} ${l.variedad} ${l.etapa} ${l.codLote}`.toLowerCase();

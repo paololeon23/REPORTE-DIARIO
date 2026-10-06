@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.56" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.56" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.80" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.80" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -174,10 +174,20 @@
           <div><small>Área</small><strong id="lbl-area">—</strong></div>
         </div>
         <p class="lote-extra" id="lbl-extra" hidden></p>
-        <label class="field-num">
-          <small id="lbl-avance">Avance (ha)</small>
-          <input id="inp-avance" inputmode="decimal" placeholder="0" />
-        </label>
+        <div class="avance-board" id="avance-board">
+          <div class="avance-col is-prev" id="avance-prev-col" hidden>
+            <small>Avance</small>
+            <b id="avance-prev">0</b>
+          </div>
+          <label class="avance-col is-now field-num">
+            <small id="lbl-avance">Avance (ha)</small>
+            <input id="inp-avance" inputmode="decimal" placeholder="0" />
+          </label>
+          <div class="avance-col is-sum" id="avance-sum-col" hidden>
+            <small>Total</small>
+            <b id="avance-total">0</b>
+          </div>
+        </div>
         <p class="avance-min" id="avance-min" hidden></p>
 
         <p class="check-label">¿Con qué trabajó?</p>
@@ -226,16 +236,20 @@
           <button type="button" class="hoy-btn dark" id="btn-sync">Sync</button>
         </div>
         <div class="day-kpis" id="day-kpis"></div>
-        <div class="open-lots" id="open-lots" hidden>
-          <p class="open-lots-title">Sin terminar</p>
-          <label class="open-search">
-            <input id="inp-open-q" inputmode="numeric" placeholder="Buscar lote" aria-label="Buscar lote" />
-          </label>
-          <div id="open-lots-list"></div>
-          <button type="button" class="open-more" id="btn-open-more" hidden>Ver más</button>
-        </div>
         <div class="lot-list" id="lot-list"></div>
         <button type="button" class="btn-ghost" id="btn-export">Ver resumen</button>
+      </section>
+
+      <section class="card" id="open-lots" hidden>
+        <div class="block-head">
+          <h2 class="block-title">Pendientes</h2>
+          <p class="block-sub">Lotes que aún no cierran el área.</p>
+        </div>
+        <label class="open-search">
+          <input id="inp-open-q" inputmode="numeric" placeholder="Buscar lote" aria-label="Buscar lote" />
+        </label>
+        <div id="open-lots-list"></div>
+        <button type="button" class="open-more" id="btn-open-more" hidden>Ver más</button>
       </section>
     </main>
   </div>
@@ -286,7 +300,7 @@
   <div class="qb-open" id="qb-open" hidden>
     <div class="qb-open-sheet" role="dialog" aria-modal="true" aria-labelledby="open-title">
       <header class="qb-open-head">
-        <h2 id="open-title">Sin terminar</h2>
+        <h2 id="open-title">Pendientes</h2>
         <button type="button" class="qb-open-close" id="btn-open-close" aria-label="Cerrar">×</button>
       </header>
       <div class="open-modal-list" id="open-modal-list"></div>
@@ -363,14 +377,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.56"></script>
-  <script src="js/catalog-lotes.js?v=2.1.56"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.56"></script>
-  <script src="js/catalog-plano.js?v=2.1.56"></script>
-  <script src="js/data.js?v=2.1.56"></script>
-  <script src="js/select.js?v=2.1.56"></script>
-  <script src="js/api.js?v=2.1.56"></script>
-  <script src="js/excel.js?v=2.1.56"></script>
-  <script src="js/app.js?v=2.1.56"></script>
+  <script src="js/config.js?v=2.1.80"></script>
+  <script src="js/catalog-lotes.js?v=2.1.80"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.80"></script>
+  <script src="js/catalog-plano.js?v=2.1.80"></script>
+  <script src="js/data.js?v=2.1.80"></script>
+  <script src="js/select.js?v=2.1.80"></script>
+  <script src="js/api.js?v=2.1.80"></script>
+  <script src="js/excel.js?v=2.1.80"></script>
+  <script src="js/app.js?v=2.1.80"></script>
 </body>
 </html>
