@@ -230,6 +230,7 @@ APP.API = (() => {
     };
     box.items.push(item);
     writeOutbox(box);
+    mirrorSyncJob();
     return item;
   }
 
@@ -238,10 +239,99 @@ APP.API = (() => {
     const box = readOutbox();
     box.items = box.items.filter((x) => (x.turnoCampo || "Mañana") !== tc);
     writeOutbox(box, silent === true);
+    mirrorSyncJob();
   }
 
   function clearOutboxAll() {
     writeOutbox({ fecha: todayKey(), items: [] }, true);
+    mirrorSyncJob();
+  }
+
+  const SYNC_DB = "qb-cosecha-sync";
+
+  function openSyncDb() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") {
+        reject(new Error("no-idb"));
+        return;
+      }
+      const req = indexedDB.open(SYNC_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("job")) db.createObjectStore("job");
+        if (!db.objectStoreNames.contains("done")) db.createObjectStore("done");
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("idb"));
+    });
+  }
+
+  function idbPut(store, key, value) {
+    return openSyncDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).put(value, key);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error("idb")); };
+    })).catch(() => {});
+  }
+
+  function registerBackgroundSync() {
+    if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+    navigator.serviceWorker.ready
+      .then((reg) => {
+        if (reg.sync && reg.sync.register) return reg.sync.register("qb-cosecha-outbox");
+      })
+      .catch(() => {});
+  }
+
+  function mirrorSyncJob() {
+    const ids = new Set();
+    readOutbox().items.forEach((item) => {
+      (item && item.clientIds || []).forEach((id) => {
+        const key = String(id || "").trim();
+        if (key) ids.add(key);
+      });
+    });
+    const ep = endpoint();
+    const records = [];
+    if (ep && ids.size) {
+      all().forEach((r) => {
+        if (!r || !r.clientId || r.syncStatus === "confirmed") return;
+        if (!ids.has(String(r.clientId))) return;
+        try {
+          records.push({ clientId: r.clientId, data: stampForSend(r) });
+        } catch (_) {}
+      });
+    }
+    return idbPut("job", "current", { endpoint: ep, records, at: Date.now() }).then(() => {
+      if (records.length) registerBackgroundSync();
+    });
+  }
+
+  function takeDoneIds() {
+    return openSyncDb().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction("done", "readwrite");
+      const store = tx.objectStore("done");
+      const req = store.getAllKeys();
+      let keys = [];
+      req.onsuccess = () => {
+        keys = (req.result || []).map((id) => String(id || "").trim()).filter(Boolean);
+        if (keys.length) store.clear();
+      };
+      req.onerror = () => reject(req.error || new Error("idb"));
+      tx.oncomplete = () => { db.close(); resolve(keys); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error("idb")); };
+    })).catch(() => []);
+  }
+
+  function applyBackgroundDone() {
+    return takeDoneIds().then((ids) => {
+      if (!ids.length) return 0;
+      const when = new Date().toISOString();
+      patchMany(ids, { syncStatus: "confirmed", uploaded: true, syncedAt: when }, true);
+      ackOutboxIds(ids);
+      return ids.length;
+    });
   }
 
   /** Quita del outbox los clientIds ya confirmados → el chip de pend. baja al instante. */
@@ -272,6 +362,7 @@ APP.API = (() => {
       });
     });
     if (changed) writeOutbox({ fecha: box.fecha || todayKey(), items: next }, true);
+    mirrorSyncJob();
   }
 
   function todayRecords(supervisorDni) {
@@ -556,7 +647,7 @@ APP.API = (() => {
         const ok = batch.map((r) => r.clientId).filter(Boolean);
         if (ok.length) {
           patchMany(ok, { syncStatus: "confirmed", uploaded: true, syncedAt: confirmedAt }, true);
-          clearOutboxReport(turnoCampo, false);
+          ackOutboxIds(ok);
           sent += ok.length;
           failures = 0;
           const leftAfter = pendingOf().length;
@@ -583,6 +674,7 @@ APP.API = (() => {
     const left = pendingOf().length;
     if (left === 0) clearOutboxReport(turnoCampo);
     window.dispatchEvent(new Event("app:activity"));
+    mirrorSyncJob();
     return {
       sent,
       left,
@@ -913,6 +1005,7 @@ APP.API = (() => {
     openLots,
     loadSession,
     saveSession,
+    applyBackgroundDone,
     listHistory,
     upsertExcelSnapshot,
     getHistory,

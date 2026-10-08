@@ -304,18 +304,77 @@ APP.App = (() => {
     if (sub) sub.textContent = turno === "Tarde" ? "Sigue los lotes de la mañana o agrega uno nuevo." : "Lote, avance y jarras del día.";
   }
 
+  function horaLima() {
+    try {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: (APP.CONFIG && APP.CONFIG.TZ) || "America/Lima",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date());
+      const n = (type) => {
+        const v = Number((parts.find((p) => p.type === type) || {}).value);
+        return Number.isFinite(v) ? v : 0;
+      };
+      return { h: n("hour") % 24, m: n("minute"), s: n("second") };
+    } catch (_) {
+      const d = new Date();
+      return { h: d.getHours(), m: d.getMinutes(), s: d.getSeconds() };
+    }
+  }
+
+  /** 13:30 hora Perú: el botón de turno pasa a Tarde. */
+  function esHoraTarde() {
+    const t = horaLima();
+    return t.h > 13 || (t.h === 13 && t.m >= 30);
+  }
+
+  function msHasta1330() {
+    const t = horaLima();
+    const now = ((t.h * 60 + t.m) * 60 + t.s) * 1000;
+    const cut = (13 * 60 + 30) * 60 * 1000;
+    return now >= cut ? 0 : cut - now;
+  }
+
   function ensureTurnoDelDia() {
     const day = today();
+    const tarde = esHoraTarde();
     if (!state.session.turnoFecha) {
       state.session.turnoFecha = day;
+      if (tarde && state.session.turnoCampo !== "Tarde") {
+        state.session.turnoCampo = "Tarde";
+        state.session.turnoAutoTarde = true;
+      }
       persistSession();
       return;
     }
     if (state.session.turnoFecha !== day) {
       state.session.turnoFecha = day;
-      state.session.turnoCampo = "Mañana";
+      state.session.turnoAutoTarde = false;
+      state.session.turnoCampo = tarde ? "Tarde" : "Mañana";
+      if (tarde) state.session.turnoAutoTarde = true;
+      persistSession();
+      return;
+    }
+    if (!state.session.turnoAutoTarde && tarde) {
+      state.session.turnoAutoTarde = true;
+      if (state.session.turnoCampo !== "Tarde") state.session.turnoCampo = "Tarde";
       persistSession();
     }
+  }
+
+  function scheduleTurnoReloj() {
+    if (state._turnoTimer) clearTimeout(state._turnoTimer);
+    state._turnoTimer = 0;
+    const ms = msHasta1330();
+    if (!ms) return;
+    state._turnoTimer = setTimeout(() => {
+      state._turnoTimer = 0;
+      ensureTurnoDelDia();
+      paintPeople();
+      paintDay();
+    }, ms + 250);
   }
 
   function syncTurnoCampo() {
@@ -783,7 +842,7 @@ APP.App = (() => {
             let allUp = true;
             parts.forEach((r) => {
               avanceN += Number(r.avance) || 0;
-              const d = APP.Data.derive(r);
+            const d = APP.Data.derive(r);
               jarras += d.totalJarras;
               kg += d.totalKg;
               if (!APP.API.isUploaded(r)) allUp = false;
@@ -1549,7 +1608,7 @@ APP.App = (() => {
       turnoMenu.addEventListener("click", (e) => {
         const opt = e.target.closest("[data-turno]");
         if (!opt) return;
-        state.session.turnoCampo = opt.dataset.turno === "Tarde" ? "Tarde" : "Mañana";
+          state.session.turnoCampo = opt.dataset.turno === "Tarde" ? "Tarde" : "Mañana";
         persistSession();
         paintPeople();
         paintDay();
@@ -1705,18 +1764,12 @@ APP.App = (() => {
       transferMode();
     });
 
-    const pendingBtn = $("#chip-pending");
-    if (pendingBtn) {
-      pendingBtn.onclick = () => {
-        const n = APP.API.pendingCount();
-        feedback(
-          n ? (n === 1 ? "1 envío por confirmar" : `${n} envíos por confirmar`) : "Nada por enviar",
-          n
-            ? "Un Enviar = 1 pendiente. Baja a 0 cuando el servidor responde ok."
-            : "Los lotes Guardados están en el celular. El pendiente aparece al pulsar Enviar."
-        );
-      };
-    }
+    document.querySelectorAll("#chip-pending, [data-chip-pending]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await enableSyncNotifications_();
+        syncPending(true);
+      });
+    });
 
     window.addEventListener("online", paintStatus);
     window.addEventListener("offline", paintStatus);
@@ -2073,6 +2126,46 @@ APP.App = (() => {
     return `El lote ${draft.lote} tiene cambios sin Guardar. El envío usa lo guardado, no lo de la pantalla.`;
   }
 
+  async function enableSyncNotifications_() {
+    if (!("Notification" in window)) return false;
+    try {
+      if (Notification.permission === "granted") return true;
+      if (Notification.permission === "denied") return false;
+      const perm = await Notification.requestPermission();
+      return perm === "granted";
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function avisarLlegada(n) {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const count = Math.max(1, Number(n) || 1);
+    const title = "Pendientes enviados";
+    const body = `Se subieron ${count} registro${count === 1 ? "" : "s"}.`;
+    const opts = {
+      body,
+      icon: "./assets/icon-192.png",
+      badge: "./assets/icon-192.png",
+      tag: "qb-envio-ok",
+      renotify: true,
+    };
+    const local = () => {
+      try { new Notification(title, opts); } catch (_) {}
+    };
+    if (!("serviceWorker" in navigator)) {
+      local();
+      return;
+    }
+    navigator.serviceWorker.getRegistration()
+      .then((reg) => (reg && reg.showNotification ? reg.showNotification(title, opts) : local()))
+      .catch(local);
+  }
+
+  async function syncPending() {
+    await tryAutoSync();
+  }
+
   async function transferMode(opts) {
     const auto = !!(opts && opts.auto);
     if (state.transferring) return;
@@ -2208,6 +2301,7 @@ APP.App = (() => {
         paintDay();
         paintHistorial();
         paintStatus();
+        avisarLlegada(queue.length);
       toast("Se envió.");
         return;
       }
@@ -2219,6 +2313,7 @@ APP.App = (() => {
       paintDay();
       paintHistorial();
       paintStatus();
+      avisarLlegada(queue.length);
       toast("Se envió.");
     } catch (e) {
       hideLoader();
@@ -2501,6 +2596,13 @@ APP.App = (() => {
     appReady = true;
     loadSession();
     APP.API.pruneOldRecords();
+    if (APP.API.applyBackgroundDone) {
+      APP.API.applyBackgroundDone().then(() => {
+        paintDay();
+        paintStatus();
+        paintHistorial();
+      }).catch(() => {});
+    }
     paintPeople();
     paintLote();
     paintChecks();
@@ -2518,11 +2620,15 @@ APP.App = (() => {
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         refreshDay();
+        paintPeople();
+        scheduleTurnoReloj();
         if (hasInterruptedSend()) scheduleAutoSync(2000);
       }
     });
     window.addEventListener("focus", () => {
       refreshDay();
+      paintPeople();
+      scheduleTurnoReloj();
       if (hasInterruptedSend()) scheduleAutoSync(2000);
     });
     window.addEventListener("online", () => {
@@ -2530,6 +2636,7 @@ APP.App = (() => {
       if (hasInterruptedSend()) scheduleAutoSync(2800);
     });
     if (hasInterruptedSend()) scheduleAutoSync(1500);
+    scheduleTurnoReloj();
     if (APP.Data && APP.Data.load) {
       APP.Data.load()
         .then(() => paintPeople())
@@ -2538,12 +2645,18 @@ APP.App = (() => {
     window.addEventListener("app:catalogs", paintPeople);
     hideBoot();
     if ("serviceWorker" in navigator && /^https?:$/i.test(location.protocol)) {
-      navigator.serviceWorker.register("./sw.js?v=" + (APP.CONFIG.VERSION || "")).catch(() => {});
-      navigator.serviceWorker.addEventListener("controllerchange", () => {
-        if (window.__qbReloading) return;
-        window.__qbReloading = true;
-        location.reload();
+      navigator.serviceWorker.addEventListener("message", (event) => {
+        if (!event.data || event.data.type !== "qb-sync-done") return;
+        if (!APP.API.applyBackgroundDone) return;
+        APP.API.applyBackgroundDone().then(() => {
+          paintDay();
+          paintStatus();
+          paintHistorial();
+        }).catch(() => {});
       });
+      setTimeout(() => {
+        navigator.serviceWorker.register("./sw.js?v=" + (APP.CONFIG.VERSION || "")).catch(() => {});
+      }, 1600);
     }
   }
 
