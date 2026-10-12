@@ -1,4 +1,4 @@
-const CACHE = "qb-cosecha-v210";
+const CACHE = "qb-cosecha-v212";
 const ASSETS = [
   "./",
   "./index.html",
@@ -43,18 +43,19 @@ function isHtmlResponse(res) {
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) =>
-        Promise.all(
-          ASSETS.map((url) =>
-            c.add(url).catch((err) => {
-              console.warn("SW skip", url, err && err.message);
-            })
+    caches.open(CACHE).then(async (cache) => {
+      const saved = await Promise.all(
+        ASSETS.map((url) =>
+          cache.add(url).then(
+            () => true,
+            () => false
           )
         )
-      )
-      .then(() => self.skipWaiting())
+      );
+      const ok = saved.filter(Boolean).length;
+      if (ok < ASSETS.length - 4) throw new Error("precache-incomplete");
+      await self.skipWaiting();
+    })
   );
 });
 
@@ -183,6 +184,10 @@ self.addEventListener("sync", (event) => {
   event.waitUntil(runOutboxSync());
 });
 
+function fromCache(req) {
+  return caches.match(req).then((hit) => hit || caches.match(req, { ignoreSearch: true }));
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -191,39 +196,23 @@ self.addEventListener("fetch", (event) => {
   if (/script\.google\.com|googleusercontent\.com/i.test(url.href)) return;
 
   const htmlNav = req.mode === "navigate" || url.pathname.endsWith(".html") || url.pathname === "/" || url.pathname.endsWith("/");
-  const code = /\.(js|css|html)$/i.test(url.pathname) || htmlNav;
-
-  if (code) {
-    event.respondWith(
-      caches.match(req).then((cached) => {
-        if (cached) return cached;
-        return fetch(req)
-          .then((res) => {
-            if (res && res.ok && (htmlNav || !isHtmlResponse(res))) {
-              const copy = res.clone();
-              caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-            }
-            return res;
-          })
-          .catch(() => caches.match("./index.html").then((page) => page || caches.match("./")));
-      })
-    );
-    return;
-  }
-
   const asset = isStaticAsset(url);
+
   event.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
+    fromCache(req).then((cached) => {
+      if (cached) return cached;
       return fetch(req)
         .then((res) => {
-          if (res && res.ok && asset && !isHtmlResponse(res)) {
+          if (res && res.ok && (htmlNav || (asset && !isHtmlResponse(res)) || (/\.(js|css)$/i.test(url.pathname) && !isHtmlResponse(res)))) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => Response.error());
+        .catch(() => {
+          if (!htmlNav) return Response.error();
+          return caches.match("./index.html").then((page) => page || caches.match("./") || Response.error());
+        });
     })
   );
 });

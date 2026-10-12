@@ -1904,7 +1904,8 @@ body.is-desktop .qb-toast {
   font-weight: 600;
   color: var(--qb-muted);
 }
-.hist-list { display: grid; gap: 10px; }
+.hist-list { display: grid; gap: 14px; }
+.hist-report { display: grid; gap: 8px; }
 .hist-card {
   background: #fff;
   border: 1px solid var(--qb-line);

@@ -13,8 +13,8 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
-  <link rel="stylesheet" href="css/fonts.css?v=2.1.86" />
-  <link rel="stylesheet" href="css/styles.css?v=2.1.86" />
+  <link rel="stylesheet" href="css/fonts.css?v=2.1.88" />
+  <link rel="stylesheet" href="css/styles.css?v=2.1.88" />
   <script>
     (function () {
       function allowMobileOrTablet() {
@@ -22,6 +22,7 @@
         var h = window.innerHeight || 0;
         var shortSide = Math.min(w, h);
         var longSide = Math.max(w, h);
+        if (!w || !h) return true;
         return shortSide >= 280 && shortSide <= 1024 && longSide <= 1400;
       }
       if (!allowMobileOrTablet()) {
@@ -347,7 +348,6 @@
       </div>
     </header>
     <div class="hist-scroll">
-      <p class="hist-lead">Los Excel quedan 24 horas en el celular.</p>
       <div class="hist-list" id="hist-list"></div>
     </div>
   </div>
@@ -377,14 +377,14 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=2.1.86"></script>
-  <script src="js/catalog-lotes.js?v=2.1.86"></script>
-  <script src="js/catalog-supervisores.js?v=2.1.86"></script>
-  <script src="js/catalog-plano.js?v=2.1.86"></script>
-  <script src="js/data.js?v=2.1.86"></script>
-  <script src="js/select.js?v=2.1.86"></script>
-  <script src="js/api.js?v=2.1.86"></script>
-  <script src="js/excel.js?v=2.1.86"></script>
-  <script src="js/app.js?v=2.1.86"></script>
+  <script src="js/config.js?v=2.1.88"></script>
+  <script src="js/catalog-lotes.js?v=2.1.88"></script>
+  <script src="js/catalog-supervisores.js?v=2.1.88"></script>
+  <script src="js/catalog-plano.js?v=2.1.88"></script>
+  <script src="js/data.js?v=2.1.88"></script>
+  <script src="js/select.js?v=2.1.88"></script>
+  <script src="js/api.js?v=2.1.88"></script>
+  <script src="js/excel.js?v=2.1.88"></script>
+  <script src="js/app.js?v=2.1.88"></script>
 </body>
 </html>

@@ -1894,9 +1894,7 @@ APP.App = (() => {
       .replace(/"/g, "&quot;");
   }
 
-  function paintExportPreview(model) {
-    const box = $("#export-preview");
-    if (!box) return;
+  function guideCardHtml(model) {
     const t = model.totals || {};
     const rows = model.rows || [];
     const fundo = rows[0]?.fundo || "LICAPA";
@@ -1918,7 +1916,7 @@ APP.App = (() => {
           })
           .join("")
       : `<tr><td colspan="5" class="empty-row">Aún no hay lotes hoy.</td></tr>`;
-    box.innerHTML = `
+    return `
       <article class="guide-card">
         <header class="guide-head">
           <img src="assets/logo-qberries.png" alt="" width="36" height="36" />
@@ -1961,40 +1959,53 @@ APP.App = (() => {
       </article>`;
   }
 
+  function paintExportPreview(model) {
+    const box = $("#export-preview");
+    if (!box || !model) return;
+    box.innerHTML = guideCardHtml(model);
+  }
+
   function closeExport() {
     $("#qb-export").hidden = true;
   }
 
-  function hoursLeft(expiresAt) {
-    const ms = Number(expiresAt) - Date.now();
-    if (ms <= 0) return "Venció";
-    const h = Math.max(1, Math.ceil(ms / 3600000));
-    return h === 1 ? "Queda 1 h" : `Quedan ${h} h`;
+  function modelFromHistory(item) {
+    try {
+      return APP.Excel.buildFile({
+        session: item.session || state.session,
+        fecha: item.fecha,
+        records: item.records || [],
+      }).model;
+    } catch (_) {
+      return null;
+    }
   }
 
   function paintHistorial() {
     const box = $("#hist-list");
     if (!box) return;
     const items = APP.API.listHistory();
-    box.innerHTML = items.length
-      ? items
-          .map((item) => {
-            const pending = item.pending !== false;
-            return `<article class="hist-card">
-              <div class="hist-card-top">
-                <div>
-                  <strong>${esc(fmtDate(item.fecha))} · ${esc(item.turnoCampo || "Mañana")}</strong>
-                  <small>${esc(item.supervisor || "—")}</small>
-                </div>
-                <span class="hist-badge${pending ? "" : " ok"}">${pending ? "Pendiente" : "Enviado"}</span>
-              </div>
-              <div class="hist-meta">${item.lotes || 0} lote${item.lotes === 1 ? "" : "s"} · ${esc(item.jarras || 0)} jarras · ${esc(item.kg || 0)} kg</div>
-              <div class="hist-ttl">${hoursLeft(item.expiresAt)} para descargar el Excel</div>
-              <button type="button" class="hist-dl" data-hist="${esc(item.id)}">Descargar Excel</button>
-            </article>`;
-          })
-          .join("")
-      : `<p class="empty">No hay reportes de las últimas 24 horas.</p>`;
+    let live = null;
+    try {
+      live = exportPack().model;
+    } catch (_) {}
+    const liveKey = live
+      ? `${live.fecha}|${live.turnoCampo || "Mañana"}|${String(state.session.supervisorDni || "").trim()}`
+      : "";
+    const older = items.filter((item) => {
+      const key = `${item.fecha}|${item.turnoCampo || "Mañana"}|${String((item.session && item.session.supervisorDni) || "").trim()}`;
+      return key !== liveKey;
+    });
+    const cards = [];
+    if (live) cards.push(`<div class="hist-report">${guideCardHtml(live)}</div>`);
+    older.forEach((item) => {
+      const model = modelFromHistory(item);
+      if (!model) return;
+      cards.push(`<div class="hist-report">${guideCardHtml(model)}
+        <button type="button" class="hist-dl" data-hist="${esc(item.id)}">Descargar Excel</button>
+      </div>`);
+    });
+    box.innerHTML = cards.join("") || `<p class="empty">No hay reportes de las últimas 24 horas.</p>`;
     box.querySelectorAll("[data-hist]").forEach((btn) => {
       btn.onclick = () => downloadHistory(btn.dataset.hist);
     });
@@ -2565,6 +2576,7 @@ APP.App = (() => {
     const h = window.innerHeight || 0;
     const shortSide = Math.min(w, h);
     const longSide = Math.max(w, h);
+    if (!w || !h) return true;
     return shortSide >= 280 && shortSide <= 1024 && longSide <= 1400;
   }
 
