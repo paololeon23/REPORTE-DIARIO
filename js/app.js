@@ -863,7 +863,7 @@ APP.App = (() => {
             const cerrado = loteYaCerrado(r0.lote, r0.fundo, areaN, avanceN)
               || (allUp && servidorYaLoCerro(r0.lote, r0.fundo));
             const falta = !cerrado && Number.isFinite(areaN) && areaN > 0 && avanceN + 0.0005 < areaN;
-            if (previo) APP.API.notePrevio(r0.lote, r0.fundo, supDni(), previo);
+            if (previo && typeof APP.API.notePrevio === "function") APP.API.notePrevio(r0.lote, r0.fundo, supDni(), previo);
             const previoHtml = previo
               ? `<div class="lot-last"><em>Último cosechador</em><span>${esc(previo.name)}</span><b>${esc(haFijo(previo.avance))}</b></div>`
               : "";

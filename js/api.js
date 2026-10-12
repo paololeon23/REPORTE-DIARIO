@@ -475,6 +475,25 @@ APP.API = (() => {
     };
   }
 
+  function notePrevio(lote, fundo, supervisorDni, previo) {
+    if (!previo || !String(previo.name || "").trim()) return;
+    const day = todayKey();
+    const dni = String(supervisorDni || "").trim();
+    const name = String(previo.name).trim();
+    const avance = Number(previo.avance) || 0;
+    const total = Number(previo.total) > 0 ? Number(previo.total) : avance;
+    let changed = false;
+    const next = all().map((r) => {
+      if (!r || String(r.fecha) !== day || String(r.lote) !== String(lote)) return r;
+      if (!sameFundo(r, { fundo })) return r;
+      if (dni && String(r.supervisorDni || "").trim() !== dni) return r;
+      if (r.previoNombre === name && Number(r.previoAvance) === avance && Number(r.previoTotal) === total) return r;
+      changed = true;
+      return { ...r, previoNombre: name, previoAvance: avance, previoTotal: total };
+    });
+    if (changed) write(next, true);
+  }
+
   function stampForSend(rec) {
     const session = loadSession() || {};
     // No pisar el supervisor del lote con el de la sesión actual (celular compartido).
@@ -966,6 +985,7 @@ APP.API = (() => {
     },
     localRecords,
     recordOf,
+    notePrevio,
     isUploaded: (r) => !!(r && (r.uploaded || r.syncStatus === "confirmed")),
     removeTodayLote: (lote, turnoCampo, supervisorDni, fundo) => {
       const day = todayKey();
