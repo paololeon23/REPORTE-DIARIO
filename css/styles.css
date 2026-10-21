@@ -42,7 +42,6 @@ html {
   overflow: hidden;
   overflow-x: hidden;
   overscroll-behavior: none;
-  touch-action: manipulation;
   position: fixed;
   inset: 0;
   width: 100%;
@@ -65,7 +64,6 @@ body {
   overflow: hidden;
   overflow-x: hidden;
   overscroll-behavior: none;
-  touch-action: manipulation;
   -webkit-user-drag: none;
   position: fixed;
   inset: 0;
@@ -399,9 +397,10 @@ body.is-desktop .qb-toast {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  overscroll-behavior: none;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 12px 16px calc(18px + var(--safe-bottom));
+  touch-action: pan-y;
+  padding: 12px 16px calc(56px + var(--safe-bottom));
   display: grid;
   gap: 12px;
   background: #F7F9F8;

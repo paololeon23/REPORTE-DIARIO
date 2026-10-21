@@ -2216,40 +2216,23 @@ function openLotsToday_() {
   lotOrder.forEach(function (key) {
     var lot = byLot[key];
     var dates = Object.keys(lot.days).sort();
-    var runAv = 0;
-    var runJ = 0;
-    var runNombres = [];
-    var runPartes = [];
-    var openDesde = '';
-    dates.forEach(function (f) {
-      var day = lot.days[f];
-      if (!openDesde) openDesde = f;
-      runAv += day.avance;
-      runJ += day.jarras;
-      day.nombres.forEach(function (nombre) {
-        if (runNombres.indexOf(nombre) < 0) runNombres.push(nombre);
-      });
-      runPartes = runPartes.concat(day.partes);
-      if (!lotGap_(runAv, lot.area)) {
-        runAv = 0;
-        runJ = 0;
-        runNombres = [];
-        runPartes = [];
-        openDesde = '';
-      }
-    });
-    if (!openDesde || !lotGap_(runAv, lot.area)) return;
+    if (!dates.length) return;
+    // Último día trabajado del lote (ej. 20): si ese día no cerró área, sale pendiente
+    // aunque hoy sea 21. Igual que el rojo de Acumulado.
+    var last = dates[dates.length - 1];
+    var day = lot.days[last];
+    if (!lotGap_(day.avance, lot.area)) return;
     items.push({
-      fecha: openDesde,
+      fecha: last,
       lote: lot.lote,
-      avance: Math.round(runAv * 1000) / 1000,
+      avance: Math.round(num(day.avance) * 1000) / 1000,
       area: Math.round(lot.area * 1000) / 1000,
-      jarras: Math.round(runJ),
-      supervisor: runNombres.join(', '),
+      jarras: Math.round(num(day.jarras)),
+      supervisor: day.nombres.join(', '),
       turno: lot.turno,
       fundo: lot.fundo,
       modulo: lot.modulo,
-      partes: runPartes,
+      partes: day.partes,
       puede: true
     });
   });

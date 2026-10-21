@@ -1052,14 +1052,19 @@ APP.App = (() => {
   }
 
   function unfinishedLots() {
+    // Confía en abiertos del servidor: si la hoja dice que falta área, sale en Pendientes.
     return (state.openLots || []).filter((r) => {
       const av = Number(r.avance) || 0;
       const ar = Number(r.area) || 0;
-      if (!(ar > 0) || !(av + 0.0005 < ar)) return false;
-      const mio = avanceMio(r.lote, r.fundo);
-      if (mio > 0 && loteYaCerrado(r.lote, r.fundo, ar, mio)) return false;
-      return true;
+      return ar > 0 && av + 0.0005 < ar;
     });
+  }
+
+  function matchOpenLote(r, q) {
+    const want = String(q || "").replace(/\D/g, "");
+    if (!want) return true;
+    const got = String(r && r.lote != null ? r.lote : "").replace(/\D/g, "");
+    return got === want || got.includes(want);
   }
 
   function openLotHtml(r, i) {
@@ -1093,19 +1098,20 @@ APP.App = (() => {
     const listEl = $("#open-lots-list");
     const more = $("#btn-open-more");
     if (!box || !listEl) return;
+    box.hidden = false;
     const list = unfinishedLots();
+    const q = String(state.openQuery || "").trim();
+    const matched = q ? list.filter((r) => matchOpenLote(r, q)) : list;
+    const shown = q ? matched : list.slice(0, 3);
     if (!list.length) {
-      box.hidden = true;
-      listEl.innerHTML = "";
+      listEl.innerHTML = q
+        ? `<p class="open-empty">No hay pendiente del lote ${esc(q)}.</p>`
+        : `<p class="open-empty">No hay lotes pendientes de área.</p>`;
       if (more) more.hidden = true;
       return;
     }
-    box.hidden = false;
-    const q = String(state.openQuery || "").trim();
-    const matched = q ? list.filter((r) => String(r.lote || "").includes(q)) : list;
-    const shown = q ? matched : list.slice(0, 3);
     if (!shown.length) {
-      listEl.innerHTML = `<p class="open-empty">Ningún lote con ese número.</p>`;
+      listEl.innerHTML = `<p class="open-empty">Ningún pendiente con el lote ${esc(q)}.</p>`;
     } else {
       listEl.innerHTML = shown.map((r) => openLotHtml(r, list.indexOf(r))).join("");
       bindOpenClicks(listEl, list);
@@ -1114,7 +1120,8 @@ APP.App = (() => {
   }
 
   function paintOpenModal() {
-    const list = unfinishedLots();
+    const q = String(state.openQuery || "").trim();
+    const list = unfinishedLots().filter((r) => matchOpenLote(r, q));
     const size = 5;
     const pages = Math.max(1, Math.ceil(list.length / size));
     if (state.openPage >= pages) state.openPage = pages - 1;
@@ -1730,6 +1737,7 @@ APP.App = (() => {
       state.openQuery = text;
       if (el && el.value !== text) el.value = text;
       paintOpenLots();
+      if (text) refreshOpenLots(true);
     });
     click("#btn-open-more", openLotsModal);
     click("#btn-open-close", closeOpenModal);

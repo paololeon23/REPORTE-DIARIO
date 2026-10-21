@@ -557,7 +557,8 @@ APP.API = (() => {
     if (!force && openLotsAt && Date.now() - openLotsAt < 20000) return openLotsItems;
     try {
       const sep = ep.includes("?") ? "&" : "?";
-      const res = await fetchTimeout(ep + sep + "abiertos=1", { method: "GET", cache: "no-store" }, 12000);
+      const stamp = force ? "&t=" + Date.now() : "";
+      const res = await fetchTimeout(ep + sep + "abiertos=1" + stamp, { method: "GET", cache: "no-store" }, 12000);
       const text = await res.text();
       const json = JSON.parse(text);
       if (json && json.ok && Array.isArray(json.items)) {
