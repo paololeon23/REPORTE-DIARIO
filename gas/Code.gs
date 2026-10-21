@@ -27,7 +27,7 @@ var ACUM_HEADERS = [
   'Jarras Conv', 'Kg Conv', 'Jarras China', 'Kg China',
   'Total Jarras', 'Total Kg', 'Jornales', 'Kg/ha', 'Kg/Jn', 'Hora registro'
 ];
-var GAP_RED = '#F4C7C3';
+var GAP_RED = '#FF5252';
 
 function jsonOut_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
@@ -2136,7 +2136,7 @@ function paintTodayAcumGaps_(sh) {
   for (i = 0; i < n; i++) {
     f = toIsoFecha_(fechas[i][0]);
     if (!f) continue;
-    key = String(lotes[i][0] || '').trim() + '|' + String(cFundo > 0 ? fundos[i][0] : '').toUpperCase();
+    key = f + '|' + String(lotes[i][0] || '').trim() + '|' + String(cFundo > 0 ? fundos[i][0] : '').toUpperCase();
     if (!groups[key]) groups[key] = { rows: [], avance: 0, area: 0 };
     groups[key].rows.push(i + 2);
     groups[key].avance += num(avs[i][0]);
@@ -2176,55 +2176,80 @@ function openLotsToday_() {
   if (cFecha < 0 || cLote < 0 || cAv < 0 || cAr < 0) return { ok: true, fecha: iso, items: [] };
   var n = sh.getLastRow() - 1;
   var data = sh.getRange(2, 1, n, width).getValues();
-  var groups = {};
-  var order = [];
+  // Por lote|fundo y día: si un ciclo ya cerró el área, el siguiente día empieza de nuevo.
+  // Así en el celular vuelven a salir todos los pendientes con nombre.
+  var byLot = {};
+  var lotOrder = [];
   data.forEach(function (row) {
     var f = toIsoFecha_(row[cFecha]);
     if (!f || f > iso) return;
     var lote = String(row[cLote] || '').trim();
+    if (!lote) return;
     var fundo = cFundo >= 0 ? String(row[cFundo] || '').trim() : '';
     var key = lote + '|' + fundo.toUpperCase();
-    if (!groups[key]) {
-      groups[key] = {
-        fecha: iso,
+    if (!byLot[key]) {
+      byLot[key] = {
         lote: lote,
         fundo: fundo,
         modulo: cMod >= 0 ? String(row[cMod] || '').trim() : '',
         turno: cTurno >= 0 ? String(row[cTurno] || '').replace(/^T/i, '').trim() : '',
         area: 0,
-        avance: 0,
-        jarras: 0,
-        nombres: [],
-        partes: []
+        days: {}
       };
-      order.push(key);
+      lotOrder.push(key);
     }
-    var g = groups[key];
+    var lot = byLot[key];
+    lot.area = Math.max(lot.area, num(row[cAr]));
+    if (cMod >= 0 && !lot.modulo) lot.modulo = String(row[cMod] || '').trim();
+    if (cTurno >= 0 && !lot.turno) lot.turno = String(row[cTurno] || '').replace(/^T/i, '').trim();
+    if (!lot.days[f]) lot.days[f] = { avance: 0, jarras: 0, nombres: [], partes: [] };
+    var day = lot.days[f];
     var avance = num(row[cAv]);
     var dni = cDni >= 0 ? String(row[cDni] || '').replace(/\D/g, '').slice(0, 8) : '';
     var nombre = cSup >= 0 ? String(row[cSup] || '').trim() : '';
-    g.avance += avance;
-    g.area = Math.max(g.area, num(row[cAr]));
-    if (cJarras >= 0) g.jarras += num(row[cJarras]);
-    if (nombre && g.nombres.indexOf(nombre) < 0) g.nombres.push(nombre);
-    if (f === iso) g.hoy = true;
-    g.partes.push({ dni: dni, avance: Math.round(avance * 1000) / 1000 });
+    day.avance += avance;
+    if (cJarras >= 0) day.jarras += num(row[cJarras]);
+    if (nombre && day.nombres.indexOf(nombre) < 0) day.nombres.push(nombre);
+    day.partes.push({ dni: dni, avance: Math.round(avance * 1000) / 1000 });
   });
   var items = [];
-  order.forEach(function (key) {
-    var g = groups[key];
-    if (!lotGap_(g.avance, g.area)) return;
+  lotOrder.forEach(function (key) {
+    var lot = byLot[key];
+    var dates = Object.keys(lot.days).sort();
+    var runAv = 0;
+    var runJ = 0;
+    var runNombres = [];
+    var runPartes = [];
+    var openDesde = '';
+    dates.forEach(function (f) {
+      var day = lot.days[f];
+      if (!openDesde) openDesde = f;
+      runAv += day.avance;
+      runJ += day.jarras;
+      day.nombres.forEach(function (nombre) {
+        if (runNombres.indexOf(nombre) < 0) runNombres.push(nombre);
+      });
+      runPartes = runPartes.concat(day.partes);
+      if (!lotGap_(runAv, lot.area)) {
+        runAv = 0;
+        runJ = 0;
+        runNombres = [];
+        runPartes = [];
+        openDesde = '';
+      }
+    });
+    if (!openDesde || !lotGap_(runAv, lot.area)) return;
     items.push({
-      fecha: g.fecha,
-      lote: g.lote,
-      avance: Math.round(g.avance * 1000) / 1000,
-      area: Math.round(g.area * 1000) / 1000,
-      jarras: Math.round(g.jarras),
-      supervisor: g.nombres.join(', '),
-      turno: g.turno,
-      fundo: g.fundo,
-      modulo: g.modulo,
-      partes: g.partes,
+      fecha: openDesde,
+      lote: lot.lote,
+      avance: Math.round(runAv * 1000) / 1000,
+      area: Math.round(lot.area * 1000) / 1000,
+      jarras: Math.round(runJ),
+      supervisor: runNombres.join(', '),
+      turno: lot.turno,
+      fundo: lot.fundo,
+      modulo: lot.modulo,
+      partes: runPartes,
       puede: true
     });
   });
